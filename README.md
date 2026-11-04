@@ -14,5 +14,9 @@ Carte Lovelace pour l'intégration [Chauffage Manager](https://github.com/Mookun
 type: custom:chauffage-manager-card
 title: Chauffage                            # optionnel
 tabs: [rooms, schedules, absence, config]   # optionnel, ex. [rooms] pour une carte « pièces » seule
+group_by_floor: true                        # optionnel : sépare les pièces par étage
 ```
 Les onglets Plannings (édition), Absence (enregistrement) et Configuration sont réservés aux administrateurs.
+
+## Tri par étage (optionnel)
+Chaque chauffage ou groupe a un champ **Étage** (Configuration). Les étages définis dans Home Assistant sont proposés dans la liste, et vous pouvez en saisir un autre. Avec `group_by_floor: true`, l'onglet Pièces affiche un séparateur par étage (ordre des niveaux Home Assistant), puis « Sans étage ». Sans cette option, la liste reste inchangée.

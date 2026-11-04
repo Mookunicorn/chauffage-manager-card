@@ -81,7 +81,10 @@ ha-card{overflow:hidden}
 .tl b{width:12px;font-size:.75em;color:var(--secondary-text-color)}
 .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:.75em;color:var(--secondary-text-color);margin-top:8px}
 .legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
-select{font:inherit;height:40px;padding:0 10px;border-radius:8px;border:none;border-bottom:1px solid var(--secondary-text-color);background:var(--input-fill-color,var(--secondary-background-color));color:var(--primary-text-color)}
+.floor{display:flex;align-items:center;gap:10px;margin:16px 0 8px;font-size:.8em;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--secondary-text-color)}
+.floor::after{content:"";flex:1;height:1px;background:var(--divider-color)}
+.floor:first-child{margin-top:0}
+.sched{margin-top:10px}
 .slot{border:1px solid var(--divider-color);border-radius:12px;padding:10px;margin-bottom:8px}
 .slot .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .days{display:flex;gap:4px}
@@ -105,7 +108,6 @@ class ChauffageManagerCard extends HTMLElement {
     this._temps = {}; this._error = ""; this._sig = ""; this._tab = null; this._forms = [];
     const r = this.shadowRoot;
     r.addEventListener("click", (e) => this._click(e));
-    r.addEventListener("change", (e) => this._change(e));
   }
   setConfig(config) {
     this._config = { tabs: ["rooms", "schedules", "absence", "config"], ...config };
@@ -207,13 +209,21 @@ class ChauffageManagerCard extends HTMLElement {
     this._mountForms();
   }
 
+  _floorRank(name) {
+    const f = Object.values(this._hass.floors || {}).find((x) => String(x.name).toLowerCase() === name.toLowerCase());
+    return f && typeof f.level === "number" ? f.level : 1000;
+  }
+  _floorSelector() {
+    const names = new Set(Object.values(this._hass.floors || {}).map((f) => f.name));
+    [...this._data.heaters, ...this._data.groups].forEach((x) => x.floor && names.add(x.floor));
+    return names.size ? { select: { custom_value: true, mode: "dropdown", options: [...names].map((n) => ({ value: n, label: n })) } } : { text: {} };
+  }
   _icon(name) { return `<ha-icon icon="mdi:${name}"></ha-icon>`; }
 
   _v_rooms() {
     const d = this._data;
     if (!d.targets.length) return `<div class="muted">Aucun chauffage configuré. Ajoutez-en dans l'onglet Configuration.</div>`;
-    const admin = this._admin();
-    const rows = d.targets.map((t) => {
+    const rowHtml = (t) => {
       const i = this._info(t);
       const m = i.mode && MODE[i.mode];
       const sub = t.kind === "group" ? `<small>${i.hs.map((h) => esc(h.name)).join(" + ")}</small>` : "";
@@ -223,14 +233,21 @@ class ChauffageManagerCard extends HTMLElement {
         const step = i.thermo ? `<span class="step"><button class="ib" data-a="temp" data-t="${t.id}" data-d="-0.5">${this._icon("minus")}</button><b>${this._tempOf(t).toFixed(1)}°C</b><button class="ib" data-a="temp" data-t="${t.id}" data-d="0.5">${this._icon("plus")}</button></span>` : "";
         ctl = `<div class="chips">${chips}${step}</div>`;
       } else {
-        const opts = `<option value="">— Aucun planning —</option>` + d.schedules.map((s) => `<option value="${s.id}" ${s.id === t.schedule_id ? "selected" : ""}>${esc(s.name)}</option>`).join("");
-        ctl = `<div class="chips"><span class="muted">Planning</span><select data-a="sched" data-t="${t.id}" data-k="${t.kind}" ${admin ? "" : "disabled"}>${opts}</select></div>`;
+        ctl = `<div class="sched" data-form="sched" data-i="${t.id}"></div>`;
       }
       return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator")}<div class="name">${esc(t.name)}${sub}</div>
         ${i.cur != null ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
         ${m ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
         <div class="seg"><button data-a="control" data-t="${t.id}" data-v="auto" class="${t.control === "auto" ? "on" : ""}">Auto</button><button data-a="control" data-t="${t.id}" data-v="manual" class="${t.control === "manual" ? "on" : ""}">Manuel</button></div></div>${ctl}</div>`;
-    }).join("");
+    };
+    const floorOf = (t) => (t.kind === "group" ? d.groups : d.heaters).find((x) => x.id === t.id)?.floor || "";
+    let rows;
+    if (this._config.group_by_floor && d.targets.some(floorOf)) {
+      const byFloor = new Map();
+      d.targets.forEach((t) => { const f = floorOf(t); if (!byFloor.has(f)) byFloor.set(f, []); byFloor.get(f).push(t); });
+      const keys = [...byFloor.keys()].sort((a, b) => (a === "") - (b === "") || (a && b ? this._floorRank(a) - this._floorRank(b) : 0));
+      rows = keys.map((k) => `<div class="floor">${esc(k || "Sans étage")}</div>${byFloor.get(k).map(rowHtml).join("")}`).join("");
+    } else rows = d.targets.map(rowHtml).join("");
     const banner = d.absence.active ? `<div class="info">${this._icon("home-export-outline")}Mode absence actif</div>` : "";
     return `${banner}${rows}<div class="actions"><button class="btn" data-a="alloff">${this._icon("power")}Tout éteindre</button></div>`;
   }
@@ -292,6 +309,23 @@ class ChauffageManagerCard extends HTMLElement {
         change: (v) => { this._abs = { ...this._abs, ...v }; this._absDirty = true; },
       };
     }
+    if (kind === "sched") {
+      const t = this._data.targets.find((x) => x.id === idx);
+      if (!t) return null;
+      return {
+        data: { schedule: t.schedule_id || "__none__" },
+        schema: [{ name: "schedule", selector: dropdown([{ value: "__none__", label: "— Aucun planning —" }, ...this._data.schedules.map((x) => ({ value: x.id, label: x.name }))]) }],
+        labels: { schedule: "Planning" },
+        change: (v) => {
+          const next = v.schedule && v.schedule !== "__none__" ? v.schedule : null;
+          if (next === (t.schedule_id || null)) return;
+          const item = { ...(t.kind === "group" ? this._data.groups : this._data.heaters).find((x) => x.id === t.id) };
+          delete item.id;
+          item.schedule_id = next;
+          this._ws({ type: "chauffage_manager/save", kind: t.kind, item_id: t.id, value: item }).catch((err) => this._toast(err));
+        },
+      };
+    }
     const e = this._edit;
     if (kind === "sname") {
       return { data: { name: e.name }, schema: [{ name: "name", required: true, selector: text }], labels: { name: "Nom du planning" }, change: (v) => { e.name = v.name || ""; } };
@@ -320,31 +354,33 @@ class ChauffageManagerCard extends HTMLElement {
         entitySel = { entity: ids.length ? { include_entities: ids } : { domain: "select" } };
       }
       return {
-        data: { name: e.name, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature },
+        data: { name: e.name, floor: e.floor || undefined, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature },
         schema: [
           { name: "name", required: true, selector: text },
+          { name: "floor", selector: this._floorSelector() },
           { name: "type", required: true, selector: dropdown([{ value: "pilot_wire", label: "Fil pilote (select)" }, { value: "thermostat", label: "Thermostat (climate)" }]) },
           { name: "entity", required: true, selector: entitySel },
           ...(pilot ? [{ name: "climate", selector: { entity: { domain: "climate" } } }]
             : [{ name: "absence_temperature", selector: { number: { min: 5, max: 30, step: 0.5, unit_of_measurement: "°C", mode: "box" } } }]),
         ],
-        labels: { name: "Nom", type: "Type", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence" },
+        labels: { name: "Nom", floor: "Étage (optionnel)", type: "Type", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence" },
         change: (v) => {
           const typeChanged = v.type !== e.type;
-          Object.assign(e, { name: v.name || "", type: v.type, entity: v.entity || "", climate: v.climate || "", absence_temperature: v.absence_temperature ?? e.absence_temperature });
+          Object.assign(e, { name: v.name || "", floor: v.floor || "", type: v.type, entity: v.entity || "", climate: v.climate || "", absence_temperature: v.absence_temperature ?? e.absence_temperature });
           if (typeChanged) { e.entity = ""; e.climate = ""; this._render(); }
         },
       };
     }
     if (kind === "group") {
       return {
-        data: { name: e.name, members: e.members },
+        data: { name: e.name, floor: e.floor || undefined, members: e.members },
         schema: [
           { name: "name", required: true, selector: text },
+          { name: "floor", selector: this._floorSelector() },
           { name: "members", selector: { select: { multiple: true, mode: "list", options: this._data.heaters.map((h) => ({ value: h.id, label: h.name })) } } },
         ],
-        labels: { name: "Nom", members: "Chauffages synchronisés (un chauffage appartient à un seul groupe)" },
-        change: (v) => { e.name = v.name || ""; e.members = v.members || []; },
+        labels: { name: "Nom", floor: "Étage (optionnel)", members: "Chauffages synchronisés (un chauffage appartient à un seul groupe)" },
+        change: (v) => { e.name = v.name || ""; e.floor = v.floor || ""; e.members = v.members || []; },
       };
     }
   }
@@ -368,8 +404,8 @@ class ChauffageManagerCard extends HTMLElement {
   _blank(kind) {
     return {
       schedule: { kind, id: null, name: "", slots: [{ days: [0, 1, 2, 3, 4], time: "06:30", mode: "comfort", temperature: 19 }, { days: [0, 1, 2, 3, 4], time: "22:00", mode: "eco", temperature: 17 }] },
-      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", absence_temperature: 12, schedule_id: null },
-      group: { kind, id: null, name: "", members: [], schedule_id: null },
+      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", absence_temperature: 12, schedule_id: null, floor: "" },
+      group: { kind, id: null, name: "", members: [], schedule_id: null, floor: "" },
     }[kind];
   }
   async _click(e) {
@@ -423,15 +459,6 @@ class ChauffageManagerCard extends HTMLElement {
       case "delslot": this._edit.slots.splice(+d.i, 1); this._render(); break;
     }
   }
-  _change(e) {
-    const el = e.target, d = el.dataset;
-    if (d.a !== "sched") return;
-    const coll = d.k === "group" ? "groups" : "heaters";
-    const item = { ...this._data[coll].find((x) => x.id === d.t) };
-    delete item.id;
-    item.schedule_id = el.value || null;
-    this._ws({ type: "chauffage_manager/save", kind: d.k, item_id: d.t, value: item }).catch((err) => this._toast(err));
-  }
   async _save() {
     const e = this._edit;
     let value;
@@ -441,9 +468,9 @@ class ChauffageManagerCard extends HTMLElement {
       value = { name: e.name.trim(), slots: e.slots.map((s) => ({ days: s.days, time: s.time, mode: s.mode, temperature: s.temperature === "" || s.temperature == null ? null : Number(s.temperature) })) };
     } else if (e.kind === "heater") {
       if (!e.entity) return this._toast("Entité requise");
-      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12 };
+      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12, floor: e.floor || null };
     } else {
-      value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null };
+      value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null, floor: e.floor || null };
     }
     try {
       await this._ws({ type: "chauffage_manager/save", kind: e.kind, item_id: e.id || undefined, value });
