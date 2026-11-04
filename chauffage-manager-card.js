@@ -4,6 +4,7 @@ const MODES = [
   ["comfort_minus_2", "Confort -2", "#ffca28"], ["comfort_minus_1", "Confort -1", "#ffa726"], ["comfort", "Confort", "#ef5350"],
 ];
 const MODE = Object.fromEntries(MODES.map((m) => [m[0], { label: m[1], color: m[2] }]));
+const MODE_OPTIONS = MODES.map((m) => ({ value: m[0], label: m[1] }));
 const PILOT = { Off: "off", FrostProtection: "frost_protection", Eco: "eco", ComfortMinus2: "comfort_minus_2", ComfortMinus1: "comfort_minus_1", Comfort: "comfort" };
 const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
 const TABS = { rooms: "Pièces", schedules: "Plannings", absence: "Absence", config: "Configuration" };
@@ -43,46 +44,56 @@ function timeline(sched) {
 
 const CSS = `
 :host{display:block}
-ha-card{padding:12px}
-.tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--divider-color)}
-.tabs button{background:none;border:none;padding:8px 12px;cursor:pointer;color:var(--secondary-text-color);font:inherit;border-bottom:2px solid transparent}
+ha-card{overflow:hidden}
+.wrap{padding:16px}
+.tabs{display:flex;border-bottom:1px solid var(--divider-color);padding:0 8px}
+.tabs button{flex:1;background:none;border:none;padding:12px 8px;cursor:pointer;color:var(--secondary-text-color);font:inherit;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px}
 .tabs button.on{color:var(--primary-color);border-bottom-color:var(--primary-color)}
-.title{font-size:1.2em;font-weight:500;margin-bottom:8px}
-.row{padding:10px 0;border-bottom:1px solid var(--divider-color)}
-.row:last-child{border-bottom:none}
-.head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.name{font-weight:500;flex:1;min-width:100px}
-.name small{display:block;font-weight:400;color:var(--secondary-text-color)}
+.title{font-size:var(--ha-card-header-font-size,24px);line-height:1.2;color:var(--ha-card-header-color,var(--primary-text-color));padding:16px 16px 0;letter-spacing:-.012em}
+.sub{font-size:var(--ha-font-size-l,16px);font-weight:500;margin:16px 0 8px}
+.row{border:1px solid var(--divider-color);border-radius:12px;padding:12px;margin-bottom:8px}
+.head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.head>ha-icon{color:var(--secondary-text-color);--mdc-icon-size:24px}
+.name{font-weight:500;flex:1;min-width:110px;color:var(--primary-text-color)}
+.name small{display:block;font-weight:400;color:var(--secondary-text-color);font-size:.85em}
 .temp{color:var(--secondary-text-color)}
-.badge{padding:2px 8px;border-radius:10px;color:#fff;font-size:.8em}
-.seg{display:flex;border:1px solid var(--divider-color);border-radius:8px;overflow:hidden}
-.seg button{border:none;background:none;padding:4px 10px;cursor:pointer;color:var(--primary-text-color);font:inherit}
+.badge{padding:3px 10px;border-radius:12px;color:#fff;font-size:.8em;font-weight:500}
+.seg{display:flex;border:1px solid var(--divider-color);border-radius:18px;overflow:hidden}
+.seg button{border:none;background:none;padding:6px 14px;cursor:pointer;color:var(--primary-text-color);font:inherit}
 .seg button.on{background:var(--primary-color);color:var(--text-primary-color,#fff)}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
-.chip{border:1px solid var(--c);background:none;color:var(--primary-text-color);border-radius:14px;padding:4px 10px;cursor:pointer;font:inherit}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
+.chip{border:1px solid var(--c);background:none;color:var(--primary-text-color);border-radius:16px;padding:5px 12px;cursor:pointer;font:inherit;font-size:.9em}
 .chip.on{background:var(--c);color:#fff}
-.step{display:flex;align-items:center;gap:6px;margin-left:8px}
-.step button,.btn{border:1px solid var(--divider-color);background:var(--card-background-color);color:var(--primary-text-color);border-radius:8px;padding:4px 10px;cursor:pointer;font:inherit}
+.step{display:flex;align-items:center;gap:4px;margin-left:8px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 16px;border:1px solid var(--divider-color);background:none;color:var(--primary-color);border-radius:18px;cursor:pointer;font:inherit;font-weight:500}
 .btn.primary{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:var(--primary-color)}
-.btn.danger{color:var(--error-color)}
-.bar{display:flex;height:10px;flex:1;border-radius:3px;overflow:hidden;background:var(--divider-color)}
+.btn.text{border-color:transparent}
+.btn ha-icon{--mdc-icon-size:18px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border:none;border-radius:50%;background:none;color:var(--secondary-text-color);cursor:pointer;padding:0}
+.ib:hover{background:var(--secondary-background-color)}
+.ib.danger{color:var(--error-color)}
+.ib ha-icon{--mdc-icon-size:20px}
+.step .ib{border:1px solid var(--divider-color)}
+.bar{display:flex;height:10px;flex:1;border-radius:5px;overflow:hidden;background:var(--divider-color)}
 .bar i{display:block;height:100%}
-.tl .tr{display:flex;align-items:center;gap:6px;margin:2px 0}
+.tl{margin-top:10px}
+.tl .tr{display:flex;align-items:center;gap:6px;margin:3px 0}
 .tl b{width:12px;font-size:.75em;color:var(--secondary-text-color)}
-.legend{display:flex;flex-wrap:wrap;gap:8px;font-size:.75em;color:var(--secondary-text-color);margin-top:6px}
-.legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:3px}
-.f{display:flex;flex-direction:column;gap:3px;margin:8px 0;font-size:.9em;color:var(--secondary-text-color)}
-input,select{font:inherit;padding:6px;border-radius:6px;border:1px solid var(--divider-color);background:var(--card-background-color);color:var(--primary-text-color)}
-.slot{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--divider-color)}
-.days{display:flex;gap:2px}
-.days button{width:26px;height:26px;border-radius:50%;border:1px solid var(--divider-color);background:none;cursor:pointer;color:var(--primary-text-color);font:inherit;font-size:.8em;padding:0}
-.days button.on{background:var(--primary-color);color:#fff;border-color:var(--primary-color)}
-.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.check{display:flex;align-items:center;gap:8px;margin:4px 0;color:var(--primary-text-color)}
-.err{background:var(--error-color);color:#fff;padding:6px 10px;border-radius:6px;margin-bottom:8px}
-.info{background:var(--primary-color);color:#fff;padding:6px 10px;border-radius:6px;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:.75em;color:var(--secondary-text-color);margin-top:8px}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
+select{font:inherit;height:40px;padding:0 10px;border-radius:8px;border:none;border-bottom:1px solid var(--secondary-text-color);background:var(--input-fill-color,var(--secondary-background-color));color:var(--primary-text-color)}
+.slot{border:1px solid var(--divider-color);border-radius:12px;padding:10px;margin-bottom:8px}
+.slot .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.days{display:flex;gap:4px}
+.days button{width:30px;height:30px;border-radius:50%;border:1px solid var(--divider-color);background:none;cursor:pointer;color:var(--primary-text-color);font:inherit;font-size:.85em;padding:0}
+.days button.on{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:var(--primary-color)}
+.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:flex-end}
+.err{background:var(--error-color);color:#fff;padding:8px 12px;border-radius:8px;margin-bottom:12px}
+.info{display:flex;align-items:center;gap:8px;background:var(--primary-color);color:var(--text-primary-color,#fff);padding:8px 12px;border-radius:8px;margin-bottom:12px}
 .muted{color:var(--secondary-text-color)}
-.li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--divider-color)}
+.hint{color:var(--secondary-text-color);font-size:.85em;margin:4px 0 8px}
+.li{display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--divider-color)}
+.li:last-of-type{border-bottom:none}
 .li .name{flex:1}
 `;
 
@@ -91,11 +102,10 @@ class ChauffageManagerCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._data = null; this._edit = null; this._abs = null; this._absDirty = false;
-    this._temps = {}; this._error = ""; this._sig = ""; this._tab = null;
+    this._temps = {}; this._error = ""; this._sig = ""; this._tab = null; this._forms = [];
     const r = this.shadowRoot;
     r.addEventListener("click", (e) => this._click(e));
     r.addEventListener("change", (e) => this._change(e));
-    r.addEventListener("input", (e) => this._change(e));
   }
   setConfig(config) {
     this._config = { tabs: ["rooms", "schedules", "absence", "config"], ...config };
@@ -109,10 +119,24 @@ class ChauffageManagerCard extends HTMLElement {
   disconnectedCallback() { if (this._unsub) { this._unsub(); this._unsub = null; } }
   set hass(hass) {
     this._hass = hass;
-    if (!this._loaded) { this._loaded = true; this._load(); }
+    if (!this._loaded) { this._loaded = true; this._load(); this._ensureHA(); }
     this._subscribe();
+    this._forms.forEach((f) => { f.hass = hass; });
     const sig = this._liveSig();
     if (sig !== this._sig) { this._sig = sig; if (this._tab === "rooms" && !this._edit) this._render(); }
+  }
+  async _ensureHA() {
+    if (!customElements.get("ha-form")) {
+      try {
+        const h = await window.loadCardHelpers();
+        const c = await h.createCardElement({ type: "entities", entities: [] });
+        await c.constructor.getConfigElement();
+      } catch (e) { /* ignore */ }
+      try { await Promise.race([customElements.whenDefined("ha-form"), new Promise((_, rej) => setTimeout(rej, 5000))]); }
+      catch (e) { this._haFail = true; }
+    }
+    this._haReady = !!customElements.get("ha-form");
+    this._render();
   }
   _subscribe() {
     if (this._unsub || this._subbing || !this._hass) return;
@@ -143,6 +167,7 @@ class ChauffageManagerCard extends HTMLElement {
     clearTimeout(this._tt);
     this._tt = setTimeout(() => { this._error = ""; this._render(); }, 5000);
   }
+  _ws(msg) { return this._hass.callWS(msg); }
 
   /* ---------- état des chauffages ---------- */
   _hstate(h) {
@@ -174,12 +199,15 @@ class ChauffageManagerCard extends HTMLElement {
   _render() {
     if (!this._config) return;
     const admin = this._admin();
-    let tabs = this._config.tabs.filter((t) => admin || t !== "config");
+    const tabs = this._config.tabs.filter((t) => admin || t !== "config");
     if (!tabs.includes(this._tab)) this._tab = tabs[0];
     const bar = tabs.length > 1 ? `<div class="tabs">${tabs.map((t) => `<button data-a="tab" data-v="${t}" class="${t === this._tab ? "on" : ""}">${TABS[t]}</button>`).join("")}</div>` : "";
     const body = !this._data ? `<div class="muted">${this._error ? "" : "Chargement…"}</div>` : this[`_v_${this._tab}`]();
-    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${this._config.title ? `<div class="title">${esc(this._config.title)}</div>` : ""}${bar}${this._error ? `<div class="err">${esc(this._error)}</div>` : ""}${body}</ha-card>`;
+    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${this._config.title ? `<div class="title">${esc(this._config.title)}</div>` : ""}${bar}<div class="wrap">${this._error ? `<div class="err">${esc(this._error)}</div>` : ""}${body}</div></ha-card>`;
+    this._mountForms();
   }
+
+  _icon(name) { return `<ha-icon icon="mdi:${name}"></ha-icon>`; }
 
   _v_rooms() {
     const d = this._data;
@@ -192,91 +220,148 @@ class ChauffageManagerCard extends HTMLElement {
       let ctl;
       if (t.control === "manual") {
         const chips = MODES.map((x) => `<button class="chip ${i.mode === x[0] ? "on" : ""}" style="--c:${x[2]}" data-a="mode" data-t="${t.id}" data-v="${x[0]}">${x[1]}</button>`).join("");
-        const step = i.thermo ? `<span class="step"><button data-a="temp" data-t="${t.id}" data-d="-0.5">−</button><b>${this._tempOf(t).toFixed(1)}°C</b><button data-a="temp" data-t="${t.id}" data-d="0.5">+</button></span>` : "";
+        const step = i.thermo ? `<span class="step"><button class="ib" data-a="temp" data-t="${t.id}" data-d="-0.5">${this._icon("minus")}</button><b>${this._tempOf(t).toFixed(1)}°C</b><button class="ib" data-a="temp" data-t="${t.id}" data-d="0.5">${this._icon("plus")}</button></span>` : "";
         ctl = `<div class="chips">${chips}${step}</div>`;
       } else {
         const opts = `<option value="">— Aucun planning —</option>` + d.schedules.map((s) => `<option value="${s.id}" ${s.id === t.schedule_id ? "selected" : ""}>${esc(s.name)}</option>`).join("");
-        ctl = `<div class="chips"><span class="muted">Planning :</span><select data-a="sched" data-t="${t.id}" data-k="${t.kind}" ${admin ? "" : "disabled"}>${opts}</select></div>`;
+        ctl = `<div class="chips"><span class="muted">Planning</span><select data-a="sched" data-t="${t.id}" data-k="${t.kind}" ${admin ? "" : "disabled"}>${opts}</select></div>`;
       }
-      return `<div class="row"><div class="head"><div class="name">${esc(t.name)}${sub}</div>
+      return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator")}<div class="name">${esc(t.name)}${sub}</div>
         ${i.cur != null ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
         ${m ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
         <div class="seg"><button data-a="control" data-t="${t.id}" data-v="auto" class="${t.control === "auto" ? "on" : ""}">Auto</button><button data-a="control" data-t="${t.id}" data-v="manual" class="${t.control === "manual" ? "on" : ""}">Manuel</button></div></div>${ctl}</div>`;
     }).join("");
-    const banner = d.absence.active ? `<div class="info">Mode absence actif</div>` : "";
-    return `${banner}${rows}<div class="actions"><button class="btn" data-a="alloff">Tout éteindre</button></div>`;
+    const banner = d.absence.active ? `<div class="info">${this._icon("home-export-outline")}Mode absence actif</div>` : "";
+    return `${banner}${rows}<div class="actions"><button class="btn" data-a="alloff">${this._icon("power")}Tout éteindre</button></div>`;
   }
 
   _v_schedules() {
     const admin = this._admin();
     const e = this._edit;
     if (e && e.kind === "schedule") {
-      const slots = e.slots.map((s, i) => `<div class="slot"><div class="days">${DAYS.map((l, d) => `<button data-a="day" data-i="${i}" data-d="${d}" class="${s.days.includes(d) ? "on" : ""}">${l}</button>`).join("")}</div>
-        <input type="time" data-f="time" data-i="${i}" value="${esc(s.time)}">
-        <select data-f="mode" data-i="${i}">${MODES.map((m) => `<option value="${m[0]}" ${s.mode === m[0] ? "selected" : ""}>${m[1]}</option>`).join("")}</select>
-        <input type="number" step="0.5" min="5" max="30" style="width:70px" placeholder="°C" title="Température (thermostat)" data-f="temperature" data-i="${i}" value="${s.temperature ?? ""}">
-        <button class="btn danger" data-a="delslot" data-i="${i}">✕</button></div>`).join("");
-      return `<label class="f"><span>Nom du planning</span><input data-f="name" value="${esc(e.name)}"></label>
-        <div class="muted" style="font-size:.85em">Chaque créneau s'applique à partir de son heure jusqu'au suivant. La température ne concerne que les thermostats.</div>${slots}
-        <div class="actions"><button class="btn" data-a="addslot">+ Créneau</button></div>
-        <div id="pv" style="margin-top:12px">${timeline(e)}</div>
-        <div class="actions"><button class="btn primary" data-a="save">Enregistrer</button><button class="btn" data-a="cancel">Annuler</button></div>`;
+      const slots = e.slots.map((s, i) => `<div class="slot"><div class="top"><div class="days">${DAYS.map((l, d) => `<button data-a="day" data-i="${i}" data-d="${d}" class="${s.days.includes(d) ? "on" : ""}">${l}</button>`).join("")}</div>
+        <button class="ib danger" data-a="delslot" data-i="${i}" title="Supprimer le créneau">${this._icon("delete")}</button></div>
+        <div data-form="slot" data-i="${i}"></div></div>`).join("");
+      return `<div data-form="sname"></div>
+        <div class="hint">Chaque créneau s'applique à partir de son heure jusqu'au suivant. La température ne concerne que les thermostats.</div>${slots}
+        <div class="actions" style="justify-content:flex-start"><button class="btn" data-a="addslot">${this._icon("plus")}Créneau</button></div>
+        <div id="pv">${timeline(e)}</div>
+        <div class="actions"><button class="btn text" data-a="cancel">Annuler</button><button class="btn primary" data-a="save">Enregistrer</button></div>`;
     }
     const list = this._data.schedules.map((s) => {
       const users = this._data.targets.filter((t) => t.schedule_id === s.id).map((t) => esc(t.name)).join(", ");
-      return `<div class="row"><div class="head"><div class="name">${esc(s.name)}<small>${users ? "Utilisé par : " + users : "Non assigné"}</small></div>
-        ${admin ? `<button class="btn" data-a="edit" data-k="schedule" data-id="${s.id}">Modifier</button><button class="btn danger" data-a="del" data-k="schedule" data-id="${s.id}">Supprimer</button>` : ""}</div>${timeline(s)}</div>`;
+      return `<div class="row"><div class="head">${this._icon("calendar-clock")}<div class="name">${esc(s.name)}<small>${users ? "Utilisé par : " + users : "Non assigné"}</small></div>
+        ${admin ? `<button class="ib" data-a="edit" data-k="schedule" data-id="${s.id}" title="Modifier">${this._icon("pencil")}</button><button class="ib danger" data-a="del" data-k="schedule" data-id="${s.id}" title="Supprimer">${this._icon("delete")}</button>` : ""}</div>${timeline(s)}</div>`;
     }).join("") || `<div class="muted">Aucun planning.</div>`;
-    return `${list}${admin ? `<div class="actions"><button class="btn primary" data-a="new" data-v="schedule">+ Nouveau planning</button></div>` : ""}
-      <div class="muted" style="margin-top:8px;font-size:.85em">L'assignation d'un planning se fait dans l'onglet Pièces (mode Auto).</div>`;
+    return `${list}${admin ? `<div class="actions"><button class="btn primary" data-a="new" data-v="schedule">${this._icon("plus")}Nouveau planning</button></div>` : ""}
+      <div class="hint">L'assignation d'un planning se fait dans l'onglet Pièces (mode Auto).</div>`;
   }
 
   _v_absence() {
-    const a = this._abs, admin = this._admin(), dis = admin ? "" : "disabled";
-    const persons = Object.keys(this._hass.states).filter((id) => id.startsWith("person.") || a.persons.includes(id)).sort();
-    const checks = persons.map((id) => `<label class="check"><input type="checkbox" ${dis} data-scope="abs" data-f="person" data-v="${id}" ${a.persons.includes(id) ? "checked" : ""}>${esc(this._hass.states[id]?.attributes.friendly_name || id)}</label>`).join("");
-    const modeOpts = MODES.map((m) => `<option value="${m[0]}" ${a.mode === m[0] ? "selected" : ""}>${m[1]}</option>`).join("");
-    const status = this._data.absence.active ? `<div class="info">Absence en cours</div>` : `<div class="muted">Présence détectée (absence = plus aucune des personnes cochées à la maison).</div>`;
-    return `${status}<div class="f"><span>Personnes</span>${checks}</div>
-      <label class="f"><span>Mode du chauffage en absence</span><select ${dis} data-scope="abs" data-f="mode">${modeOpts}</select></label>
-      <label class="f"><span>Programmation en absence</span><select ${dis} data-scope="abs" data-f="control"><option value="manual" ${a.control === "manual" ? "selected" : ""}>Manuel (applique le mode ci-dessus)</option><option value="auto" ${a.control === "auto" ? "selected" : ""}>Automatique (suit le planning)</option></select></label>
-      <label class="check"><input type="checkbox" ${dis} data-scope="abs" data-f="restore" ${a.restore ? "checked" : ""}>Restaurer l'état au retour</label>
-      ${admin ? `<div class="actions"><button class="btn primary" data-a="abs-save">Enregistrer</button></div>` : ""}`;
-  }
-
-  _opts(domain, value, filter) {
-    let ids = Object.keys(this._hass.states).filter((id) => id.startsWith(domain + "."));
-    if (filter) { const f = ids.filter((id) => filter(this._hass.states[id])); if (f.length) ids = f; }
-    if (value && !ids.includes(value)) ids.push(value);
-    ids.sort();
-    return ids.map((id) => `<option value="${id}" ${id === value ? "selected" : ""}>${esc(this._hass.states[id]?.attributes.friendly_name || id)} — ${id}</option>`).join("");
+    const status = this._data.absence.active ? `<div class="info">${this._icon("home-export-outline")}Absence en cours</div>` : `<div class="hint">Absence = plus aucune des personnes sélectionnées à la maison.</div>`;
+    return `${status}<div data-form="absence"></div>${this._admin() ? `<div class="actions"><button class="btn primary" data-a="abs-save">Enregistrer</button></div>` : ""}`;
   }
 
   _v_config() {
     const e = this._edit;
-    if (e && e.kind === "heater") {
+    if (e && (e.kind === "heater" || e.kind === "group")) {
+      return `<div class="sub">${e.id ? "Modifier" : "Nouveau"} ${e.kind === "heater" ? "chauffage" : "groupe"}</div><div data-form="${e.kind}"></div>
+        <div class="actions"><button class="btn text" data-a="cancel">Annuler</button><button class="btn primary" data-a="save">Enregistrer</button></div>`;
+    }
+    const row = (k, x, sub, icon) => `<div class="li">${this._icon(icon)}<div class="name">${esc(x.name)}<small>${sub}</small></div><button class="ib" data-a="edit" data-k="${k}" data-id="${x.id}" title="Modifier">${this._icon("pencil")}</button><button class="ib danger" data-a="del" data-k="${k}" data-id="${x.id}" title="Supprimer">${this._icon("delete")}</button></div>`;
+    const hs = this._data.heaters.map((h) => row("heater", h, `${h.type === "pilot_wire" ? "Fil pilote" : "Thermostat"} · ${esc(h.entity)}`, "radiator")).join("") || `<div class="muted">Aucun chauffage.</div>`;
+    const gs = this._data.groups.map((g) => row("group", g, g.members.map((m) => esc(this._data.heaters.find((h) => h.id === m)?.name || m)).join(" + "), "radiator-disabled")).join("") || `<div class="muted">Aucun groupe.</div>`;
+    return `<div class="sub" style="margin-top:0">Chauffages</div>${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>
+      <div class="sub">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>`;
+  }
+
+  /* ---------- formulaires Home Assistant (ha-form) ---------- */
+  _formDef(kind, idx) {
+    const text = { text: {} };
+    const dropdown = (options) => ({ select: { mode: "dropdown", options } });
+    if (kind === "absence") {
+      return {
+        data: this._abs,
+        schema: [
+          { name: "persons", selector: { entity: { domain: "person", multiple: true } } },
+          { name: "mode", selector: dropdown(MODE_OPTIONS) },
+          { name: "control", selector: dropdown([{ value: "manual", label: "Manuel (applique le mode d'absence)" }, { value: "auto", label: "Automatique (suit le planning)" }]) },
+          { name: "restore", selector: { boolean: {} } },
+        ],
+        labels: { persons: "Personnes", mode: "Mode du chauffage en absence", control: "Programmation en absence", restore: "Restaurer l'état au retour" },
+        change: (v) => { this._abs = { ...this._abs, ...v }; this._absDirty = true; },
+      };
+    }
+    const e = this._edit;
+    if (kind === "sname") {
+      return { data: { name: e.name }, schema: [{ name: "name", required: true, selector: text }], labels: { name: "Nom du planning" }, change: (v) => { e.name = v.name || ""; } };
+    }
+    if (kind === "slot") {
+      const s = e.slots[+idx];
+      return {
+        data: { time: `${s.time || "00:00"}:00`, mode: s.mode, temperature: s.temperature ?? undefined },
+        schema: [{ type: "grid", name: "", flatten: true, schema: [
+          { name: "time", required: true, selector: { time: {} } },
+          { name: "mode", required: true, selector: dropdown(MODE_OPTIONS) },
+          { name: "temperature", selector: { number: { min: 5, max: 30, step: 0.5, unit_of_measurement: "°C", mode: "box" } } },
+        ] }],
+        labels: { time: "Heure", mode: "Mode", temperature: "Température (thermostat)" },
+        change: (v) => {
+          s.time = String(v.time || "").slice(0, 5); s.mode = v.mode; s.temperature = v.temperature ?? null;
+          const pv = this.shadowRoot.getElementById("pv"); if (pv) pv.innerHTML = timeline(e);
+        },
+      };
+    }
+    if (kind === "heater") {
       const pilot = e.type === "pilot_wire";
-      const opts = (o) => `<option value="">—</option>${o}`;
-      return `<div class="title">${e.id ? "Modifier" : "Nouveau"} chauffage</div>
-        <label class="f"><span>Nom</span><input data-f="name" value="${esc(e.name)}"></label>
-        <label class="f"><span>Type</span><select data-f="type"><option value="pilot_wire" ${pilot ? "selected" : ""}>Fil pilote (select)</option><option value="thermostat" ${pilot ? "" : "selected"}>Thermostat (climate)</option></select></label>
-        <label class="f"><span>${pilot ? "Entité select du fil pilote" : "Entité climate"}</span><select data-f="entity">${opts(pilot ? this._opts("select", e.entity, (s) => (s.attributes.options || []).some((o) => o in PILOT)) : this._opts("climate", e.entity))}</select></label>
-        ${pilot ? `<label class="f"><span>Entité climate (température mesurée, optionnel)</span><select data-f="climate">${opts(this._opts("climate", e.climate))}</select></label>`
-          : `<label class="f"><span>Température en absence (°C)</span><input type="number" step="0.5" data-f="absence_temperature" value="${e.absence_temperature}"></label>`}
-        <div class="actions"><button class="btn primary" data-a="save">Enregistrer</button><button class="btn" data-a="cancel">Annuler</button></div>`;
+      let entitySel = { entity: { domain: "climate" } };
+      if (pilot) {
+        const ids = Object.keys(this._hass.states).filter((id) => id.startsWith("select.") && (this._hass.states[id].attributes.options || []).some((o) => o in PILOT));
+        entitySel = { entity: ids.length ? { include_entities: ids } : { domain: "select" } };
+      }
+      return {
+        data: { name: e.name, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature },
+        schema: [
+          { name: "name", required: true, selector: text },
+          { name: "type", required: true, selector: dropdown([{ value: "pilot_wire", label: "Fil pilote (select)" }, { value: "thermostat", label: "Thermostat (climate)" }]) },
+          { name: "entity", required: true, selector: entitySel },
+          ...(pilot ? [{ name: "climate", selector: { entity: { domain: "climate" } } }]
+            : [{ name: "absence_temperature", selector: { number: { min: 5, max: 30, step: 0.5, unit_of_measurement: "°C", mode: "box" } } }]),
+        ],
+        labels: { name: "Nom", type: "Type", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence" },
+        change: (v) => {
+          const typeChanged = v.type !== e.type;
+          Object.assign(e, { name: v.name || "", type: v.type, entity: v.entity || "", climate: v.climate || "", absence_temperature: v.absence_temperature ?? e.absence_temperature });
+          if (typeChanged) { e.entity = ""; e.climate = ""; this._render(); }
+        },
+      };
     }
-    if (e && e.kind === "group") {
-      const checks = this._data.heaters.map((h) => `<label class="check"><input type="checkbox" data-f="member" data-v="${h.id}" ${e.members.includes(h.id) ? "checked" : ""}>${esc(h.name)}</label>`).join("") || `<span class="muted">Créez d'abord des chauffages.</span>`;
-      return `<div class="title">${e.id ? "Modifier" : "Nouveau"} groupe</div>
-        <label class="f"><span>Nom</span><input data-f="name" value="${esc(e.name)}"></label>
-        <div class="f"><span>Chauffages synchronisés (un chauffage appartient à un seul groupe)</span>${checks}</div>
-        <div class="actions"><button class="btn primary" data-a="save">Enregistrer</button><button class="btn" data-a="cancel">Annuler</button></div>`;
+    if (kind === "group") {
+      return {
+        data: { name: e.name, members: e.members },
+        schema: [
+          { name: "name", required: true, selector: text },
+          { name: "members", selector: { select: { multiple: true, mode: "list", options: this._data.heaters.map((h) => ({ value: h.id, label: h.name })) } } },
+        ],
+        labels: { name: "Nom", members: "Chauffages synchronisés (un chauffage appartient à un seul groupe)" },
+        change: (v) => { e.name = v.name || ""; e.members = v.members || []; },
+      };
     }
-    const row = (k, x, sub) => `<div class="li"><div class="name">${esc(x.name)}<small>${sub}</small></div><button class="btn" data-a="edit" data-k="${k}" data-id="${x.id}">Modifier</button><button class="btn danger" data-a="del" data-k="${k}" data-id="${x.id}">Supprimer</button></div>`;
-    const hs = this._data.heaters.map((h) => row("heater", h, `${h.type === "pilot_wire" ? "Fil pilote" : "Thermostat"} · ${esc(h.entity)}`)).join("") || `<div class="muted">Aucun chauffage.</div>`;
-    const gs = this._data.groups.map((g) => row("group", g, g.members.map((m) => esc(this._data.heaters.find((h) => h.id === m)?.name || m)).join(" + "))).join("") || `<div class="muted">Aucun groupe.</div>`;
-    return `<div class="title">Chauffages</div>${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">+ Chauffage</button></div>
-      <div class="title" style="margin-top:16px">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">+ Groupe</button></div>`;
+  }
+  _mountForms() {
+    this._forms = [];
+    const hosts = this.shadowRoot.querySelectorAll("[data-form]");
+    hosts.forEach((host) => {
+      if (!this._haReady) { host.innerHTML = `<div class="muted">${this._haFail ? "Composants Home Assistant indisponibles" : "Chargement…"}</div>`; return; }
+      const def = this._formDef(host.dataset.form, host.dataset.i);
+      if (!def) return;
+      const f = document.createElement("ha-form");
+      f.hass = this._hass; f.schema = def.schema; f.data = def.data; f.disabled = !this._admin();
+      f.computeLabel = (s) => def.labels[s.name] || s.name;
+      f.addEventListener("value-changed", (ev) => { ev.stopPropagation(); f.data = ev.detail.value; def.change(ev.detail.value); });
+      host.appendChild(f);
+      this._forms.push(f);
+    });
   }
 
   /* ---------- interactions ---------- */
@@ -316,13 +401,16 @@ class ChauffageManagerCard extends HTMLElement {
         this._render(); break;
       }
       case "del":
-        if (confirm("Supprimer ?")) h.callWS({ type: "chauffage_manager/delete", kind: d.k, id: d.id }).catch((err) => this._toast(err));
+        if (confirm("Supprimer ?")) this._ws({ type: "chauffage_manager/delete", kind: d.k, item_id: d.id }).catch((err) => this._toast(err));
         break;
       case "cancel": this._edit = null; this._render(); break;
       case "save": this._save(); break;
       case "abs-save":
-        try { await h.callWS({ type: "chauffage_manager/save", kind: "absence", value: { persons: this._abs.persons, mode: this._abs.mode, control: this._abs.control, restore: !!this._abs.restore } }); this._absDirty = false; await this._load(); }
-        catch (err) { this._toast(err); }
+        try {
+          const a = this._abs;
+          await this._ws({ type: "chauffage_manager/save", kind: "absence", value: { persons: a.persons || [], mode: a.mode, control: a.control, restore: !!a.restore } });
+          this._absDirty = false; await this._load();
+        } catch (err) { this._toast(err); }
         break;
       case "day": {
         const s = this._edit.slots[+d.i], n = +d.d;
@@ -337,29 +425,12 @@ class ChauffageManagerCard extends HTMLElement {
   }
   _change(e) {
     const el = e.target, d = el.dataset;
-    if (d.a === "sched") {
-      if (e.type !== "change") return;
-      const coll = d.k === "group" ? "groups" : "heaters";
-      const item = { ...this._data[coll].find((x) => x.id === d.t) };
-      delete item.id;
-      item.schedule_id = el.value || null;
-      this._hass.callWS({ type: "chauffage_manager/save", kind: d.k, id: d.t, value: item }).catch((err) => this._toast(err));
-      return;
-    }
-    if (!d.f) return;
-    const val = el.type === "checkbox" ? el.checked : el.value;
-    if (d.scope === "abs") {
-      this._absDirty = true;
-      if (d.f === "person") this._abs.persons = val ? [...new Set([...this._abs.persons, d.v])] : this._abs.persons.filter((p) => p !== d.v);
-      else this._abs[d.f] = val;
-      return;
-    }
-    const ed = this._edit;
-    if (!ed) return;
-    if (d.i !== undefined) { ed.slots[+d.i][d.f] = val; if (e.type === "change") this.shadowRoot.getElementById("pv").innerHTML = timeline(ed); return; }
-    if (d.f === "member") { ed.members = val ? [...new Set([...ed.members, d.v])] : ed.members.filter((m) => m !== d.v); return; }
-    ed[d.f] = val;
-    if (d.f === "type" && e.type === "change") { ed.entity = ""; ed.climate = ""; this._render(); }
+    if (d.a !== "sched") return;
+    const coll = d.k === "group" ? "groups" : "heaters";
+    const item = { ...this._data[coll].find((x) => x.id === d.t) };
+    delete item.id;
+    item.schedule_id = el.value || null;
+    this._ws({ type: "chauffage_manager/save", kind: d.k, item_id: d.t, value: item }).catch((err) => this._toast(err));
   }
   async _save() {
     const e = this._edit;
@@ -375,7 +446,7 @@ class ChauffageManagerCard extends HTMLElement {
       value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null };
     }
     try {
-      await this._hass.callWS({ type: "chauffage_manager/save", kind: e.kind, id: e.id || undefined, value });
+      await this._ws({ type: "chauffage_manager/save", kind: e.kind, item_id: e.id || undefined, value });
       this._edit = null; await this._load();
     } catch (err) { this._toast(err); }
   }
