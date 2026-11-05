@@ -57,6 +57,10 @@ ha-card{overflow:hidden}
 .name{font-weight:500;flex:1;min-width:110px;color:var(--primary-text-color)}
 .name small{display:block;font-weight:400;color:var(--secondary-text-color);font-size:.85em}
 .temp{color:var(--secondary-text-color)}
+.head>ha-icon.heating{color:var(--state-climate-heat-color,#ff8c00)}
+.pw{display:inline-flex;align-items:center;gap:2px;color:var(--secondary-text-color);font-size:.85em}
+.pw.on{color:var(--state-climate-heat-color,#ff8c00);font-weight:500}
+.pw ha-icon{--mdc-icon-size:14px}
 .badge.warn{background:var(--warning-color,#ff9800)}
 .badge{padding:3px 10px;border-radius:12px;color:#fff;font-size:.8em;font-weight:500}
 .seg{display:flex;border:1px solid var(--divider-color);border-radius:18px;overflow:hidden}
@@ -165,7 +169,7 @@ class ChauffageManagerCard extends HTMLElement {
   }
   _liveSig() {
     if (!this._data) return "";
-    return this._data.heaters.map((h) => [h.entity, h.climate].map((id) => {
+    return this._data.heaters.map((h) => [h.entity, h.climate, h.power_entity].map((id) => {
       const s = id && this._hass.states[id];
       return s ? `${s.state}|${s.attributes.temperature}|${s.attributes.current_temperature}` : "";
     }).join(",")).join(";");
@@ -183,19 +187,26 @@ class ChauffageManagerCard extends HTMLElement {
   _hstate(h) {
     const s = this._hass.states[h.entity];
     if (!s) return {};
+    const pw = h.power_entity && this._hass.states[h.power_entity];
+    const power = pw && pw.state !== "unavailable" && pw.state !== "unknown" && !isNaN(Number(pw.state)) ? Number(pw.state) : null;
+    let heating = power != null ? power > Number(h.power_threshold ?? 10) : null;
     if (h.type === "pilot_wire") {
       const c = h.climate && this._hass.states[h.climate];
-      return { mode: PILOT[s.state], cur: c?.attributes.current_temperature };
+      return { mode: PILOT[s.state], cur: c?.attributes.current_temperature, power, heating };
     }
-    return { mode: s.state === "off" ? "off" : "comfort", temp: s.attributes.temperature, cur: s.attributes.current_temperature };
+    if (heating == null && s.attributes.hvac_action) heating = s.attributes.hvac_action === "heating";
+    return { mode: s.state === "off" ? "off" : "comfort", temp: s.attributes.temperature, cur: s.attributes.current_temperature, power, heating };
   }
   _info(t) {
     const hs = t.members.map((id) => this._data.heaters.find((h) => h.id === id)).filter(Boolean);
     const sts = hs.map((h) => ({ h, ...this._hstate(h) }));
     const modes = sts.map((s) => s.mode).filter(Boolean);
     const curs = sts.map((s) => Number(s.cur)).filter((v) => !isNaN(v) && v !== 0);
+    const powers = sts.map((x) => x.power).filter((v) => v != null);
     return {
       hs, mode: modes[0], mixed: new Set(modes).size > 1,
+      heating: sts.some((x) => x.heating === true),
+      power: powers.length ? powers.reduce((a, b) => a + b) : null,
       cur: curs.length ? curs.reduce((a, b) => a + b) / curs.length : null,
       thermo: sts.find((s) => s.h.type === "thermostat"),
     };
@@ -226,7 +237,7 @@ class ChauffageManagerCard extends HTMLElement {
     [...this._data.heaters, ...this._data.groups].forEach((x) => x.floor && names.add(x.floor));
     return names.size ? { select: { custom_value: true, mode: "dropdown", options: [...names].map((n) => ({ value: n, label: n })) } } : { text: {} };
   }
-  _icon(name) { return `<ha-icon icon="mdi:${name}"></ha-icon>`; }
+  _icon(name, cls = "") { return `<ha-icon${cls ? ` class="${cls}"` : ""} icon="mdi:${name}"></ha-icon>`; }
 
   _v_rooms() {
     const d = this._data;
@@ -244,7 +255,8 @@ class ChauffageManagerCard extends HTMLElement {
       } else {
         ctl = `<div class="sched" data-form="sched" data-i="${t.id}"></div>`;
       }
-      return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator")}<div class="name">${esc(t.name)}${sub}</div>
+      return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator", i.heating ? "heating" : "")}<div class="name">${esc(t.name)}${sub}</div>
+        ${i.power != null ? `<span class="pw ${i.heating ? "on" : ""}">${this._icon("flash")}${Math.round(i.power)} W</span>` : ""}
         ${i.cur != null ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
         ${t.paused ? `<span class="badge warn">En pause (ouverture)</span>` : ""}
         ${m ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
@@ -379,7 +391,7 @@ class ChauffageManagerCard extends HTMLElement {
         entitySel = { entity: ids.length ? { include_entities: ids } : { domain: "select" } };
       }
       return {
-        data: { name: e.name, floor: e.floor || undefined, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature, openings: e.openings || [] },
+        data: { name: e.name, floor: e.floor || undefined, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature, power_entity: e.power_entity || undefined, power_threshold: e.power_threshold ?? 10, openings: e.openings || [] },
         schema: [
           { name: "name", required: true, selector: text },
           { name: "floor", selector: this._floorSelector() },
@@ -387,12 +399,14 @@ class ChauffageManagerCard extends HTMLElement {
           { name: "entity", required: true, selector: entitySel },
           ...(pilot ? [{ name: "climate", selector: { entity: { domain: "climate" } } }]
             : [{ name: "absence_temperature", selector: { number: { min: 5, max: 30, step: 0.5, unit_of_measurement: "°C", mode: "box" } } }]),
+          { name: "power_entity", selector: { entity: { domain: "sensor", device_class: "power" } } },
+          { name: "power_threshold", selector: { number: { min: 0, max: 5000, step: 1, unit_of_measurement: "W", mode: "box" } } },
           { name: "openings", selector: { entity: { domain: "binary_sensor", multiple: true } } },
         ],
-        labels: { name: "Nom", floor: "Étage (optionnel)", type: "Type", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence", openings: "Ouvertures (fenêtres, portes) qui mettent en pause" },
+        labels: { name: "Nom", floor: "Étage (optionnel)", type: "Type", power_entity: "Capteur de puissance (optionnel)", power_threshold: "Seuil de chauffe", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence", openings: "Ouvertures (fenêtres, portes) qui mettent en pause" },
         change: (v) => {
           const typeChanged = v.type !== e.type;
-          Object.assign(e, { name: v.name || "", floor: v.floor || "", type: v.type, entity: v.entity || "", climate: v.climate || "", openings: v.openings || [], absence_temperature: v.absence_temperature ?? e.absence_temperature });
+          Object.assign(e, { name: v.name || "", floor: v.floor || "", type: v.type, entity: v.entity || "", climate: v.climate || "", openings: v.openings || [], power_entity: v.power_entity || "", power_threshold: v.power_threshold ?? 10, absence_temperature: v.absence_temperature ?? e.absence_temperature });
           if (typeChanged) { e.entity = ""; e.climate = ""; this._render(); }
         },
       };
@@ -431,7 +445,7 @@ class ChauffageManagerCard extends HTMLElement {
   _blank(kind) {
     return {
       schedule: { kind, id: null, name: "", slots: [{ days: [0, 1, 2, 3, 4], time: "06:30", mode: "comfort", temperature: 19 }, { days: [0, 1, 2, 3, 4], time: "22:00", mode: "eco", temperature: 17 }] },
-      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", absence_temperature: 12, schedule_id: null, floor: "", openings: [] },
+      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", absence_temperature: 12, schedule_id: null, floor: "", openings: [], power_entity: "", power_threshold: 10 },
       group: { kind, id: null, name: "", members: [], schedule_id: null, floor: "", openings: [] },
     }[kind];
   }
@@ -502,7 +516,7 @@ class ChauffageManagerCard extends HTMLElement {
       value = { name: e.name.trim(), slots: e.slots.map((s) => ({ days: s.days, time: s.time, mode: s.mode, temperature: s.temperature === "" || s.temperature == null ? null : Number(s.temperature) })) };
     } else if (e.kind === "heater") {
       if (!e.entity) return this._toast("Entité requise");
-      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12, floor: e.floor || null, openings: e.openings || [] };
+      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12, floor: e.floor || null, openings: e.openings || [], power_entity: e.power_entity || null, power_threshold: e.power_threshold === "" || e.power_threshold == null ? 10 : Number(e.power_threshold) };
     } else {
       value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null, floor: e.floor || null, openings: e.openings || [] };
     }

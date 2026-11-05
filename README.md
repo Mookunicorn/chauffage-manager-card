@@ -24,3 +24,6 @@ Chaque chauffage ou groupe a un champ **Étage** (Configuration). Les étages d�
 
 ## Ouvertures (pause des chauffages)
 Dans chaque chauffage ou groupe, le champ **Ouvertures** accepte des capteurs `binary_sensor` (fenêtres, portes). Dans l'onglet Configuration, la section **Ouvertures** règle le délai avant la pause, le délai avant la reprise et le mode appliqué pendant l'ouverture. À la fermeture, le chauffage retrouve sa consigne (ou son planning en mode Auto). Une commande manuelle pendant la pause l'annule jusqu'à la prochaine fermeture. Pour un chauffage dans un groupe, ce sont les ouvertures du groupe qui comptent.
+
+## Chauffe en cours (capteur de puissance)
+Chaque chauffage a un champ optionnel **Capteur de puissance** (par exemple la consommation de la prise ou du module Zigbee) et un **seuil de chauffe** en watts (10 W par défaut), réglables indépendamment. Au-dessus du seuil, l'icône de la pièce passe en orange ; la puissance est affichée à côté du nom (somme des membres pour un groupe). Sans capteur, un thermostat `climate` utilise son attribut `hvac_action`. Un capteur indisponible laisse l'icône neutre.
