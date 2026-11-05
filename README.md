@@ -1,6 +1,6 @@
 # Chauffage Manager Card
 
-Carte Lovelace pour l'intégration [Chauffage Manager](https://github.com/Mookunicorn/ha-chauffage-manager) : pièces, plannings, absence et configuration des chauffages.
+Carte Lovelace pour l'intégration [Chauffage Manager](https://github.com/Mookunicorn/ha-chauffage-manager) : pièces, plannings, absence, ouvertures et configuration des chauffages.
 
 [![Ouvrir dans HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Mookunicorn&repository=chauffage-manager-card&category=plugin)
 
@@ -9,7 +9,8 @@ Carte Lovelace pour l'intégration [Chauffage Manager](https://github.com/Mookun
 2. HACS → menu ⋮ → **Dépôts personnalisés** → `https://github.com/Mookunicorn/chauffage-manager-card`, catégorie **Tableau de bord**.
 3. Télécharger **Chauffage Manager Card** (la ressource est ajoutée automatiquement), puis recharger la page sans cache.
 
-## Utilisation
+## Ajout à un tableau de bord
+Mode édition → **Ajouter une carte** → **Chauffage Manager** : un formulaire permet de régler le titre, les onglets affichés et le tri par étage. Le YAML reste possible :
 ```yaml
 type: custom:chauffage-manager-card
 title: Chauffage                            # optionnel
@@ -20,3 +21,6 @@ Les onglets Plannings (édition), Absence (enregistrement) et Configuration sont
 
 ## Tri par étage (optionnel)
 Chaque chauffage ou groupe a un champ **Étage** (Configuration). Les étages définis dans Home Assistant sont proposés dans la liste, et vous pouvez en saisir un autre. Avec `group_by_floor: true`, l'onglet Pièces affiche un séparateur par étage (ordre des niveaux Home Assistant), puis « Sans étage ». Sans cette option, la liste reste inchangée.
+
+## Ouvertures (pause des chauffages)
+Dans chaque chauffage ou groupe, le champ **Ouvertures** accepte des capteurs `binary_sensor` (fenêtres, portes). Dans l'onglet Configuration, la section **Ouvertures** règle le délai avant la pause, le délai avant la reprise et le mode appliqué pendant l'ouverture. À la fermeture, le chauffage retrouve sa consigne (ou son planning en mode Auto). Une commande manuelle pendant la pause l'annule jusqu'à la prochaine fermeture. Pour un chauffage dans un groupe, ce sont les ouvertures du groupe qui comptent.

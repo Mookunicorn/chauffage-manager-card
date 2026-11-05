@@ -57,6 +57,7 @@ ha-card{overflow:hidden}
 .name{font-weight:500;flex:1;min-width:110px;color:var(--primary-text-color)}
 .name small{display:block;font-weight:400;color:var(--secondary-text-color);font-size:.85em}
 .temp{color:var(--secondary-text-color)}
+.badge.warn{background:var(--warning-color,#ff9800)}
 .badge{padding:3px 10px;border-radius:12px;color:#fff;font-size:.8em;font-weight:500}
 .seg{display:flex;border:1px solid var(--divider-color);border-radius:18px;overflow:hidden}
 .seg button{border:none;background:none;padding:6px 14px;cursor:pointer;color:var(--primary-text-color);font:inherit}
@@ -100,6 +101,19 @@ ha-card{overflow:hidden}
 .li .name{flex:1}
 `;
 
+async function ensureHA() {
+  if (!customElements.get("ha-form")) {
+    try {
+      const h = await window.loadCardHelpers();
+      const c = await h.createCardElement({ type: "entities", entities: [] });
+      await c.constructor.getConfigElement();
+    } catch (e) { /* ignore */ }
+    try { await Promise.race([customElements.whenDefined("ha-form"), new Promise((_, rej) => setTimeout(rej, 5000))]); }
+    catch (e) { /* ignore */ }
+  }
+  return !!customElements.get("ha-form");
+}
+
 class ChauffageManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -117,6 +131,7 @@ class ChauffageManagerCard extends HTMLElement {
   getCardSize() { return 6; }
   getGridOptions() { return { columns: 12, min_columns: 6 }; }
   static getStubConfig() { return {}; }
+  static async getConfigElement() { return document.createElement("chauffage-manager-card-editor"); }
   connectedCallback() { if (this._hass) { this._subscribe(); this._load(); } }
   disconnectedCallback() { if (this._unsub) { this._unsub(); this._unsub = null; } }
   set hass(hass) {
@@ -128,16 +143,8 @@ class ChauffageManagerCard extends HTMLElement {
     if (sig !== this._sig) { this._sig = sig; if (this._tab === "rooms" && !this._edit) this._render(); }
   }
   async _ensureHA() {
-    if (!customElements.get("ha-form")) {
-      try {
-        const h = await window.loadCardHelpers();
-        const c = await h.createCardElement({ type: "entities", entities: [] });
-        await c.constructor.getConfigElement();
-      } catch (e) { /* ignore */ }
-      try { await Promise.race([customElements.whenDefined("ha-form"), new Promise((_, rej) => setTimeout(rej, 5000))]); }
-      catch (e) { this._haFail = true; }
-    }
-    this._haReady = !!customElements.get("ha-form");
+    this._haReady = await ensureHA();
+    this._haFail = !this._haReady;
     this._render();
   }
   _subscribe() {
@@ -151,6 +158,7 @@ class ChauffageManagerCard extends HTMLElement {
     try {
       this._data = await this._hass.callWS({ type: "chauffage_manager/get" });
       if (!this._absDirty) this._abs = JSON.parse(JSON.stringify(this._data.absence));
+      if (!this._opnDirty) this._opn = { ...this._data.openings };
       this._error = "";
     } catch (e) { this._error = e.message || "Intégration non disponible"; }
     this._render();
@@ -237,6 +245,7 @@ class ChauffageManagerCard extends HTMLElement {
       }
       return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator")}<div class="name">${esc(t.name)}${sub}</div>
         ${i.cur != null ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
+        ${t.paused ? `<span class="badge warn">En pause (ouverture)</span>` : ""}
         ${m ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
         <div class="seg"><button data-a="control" data-t="${t.id}" data-v="auto" class="${t.control === "auto" ? "on" : ""}">Auto</button><button data-a="control" data-t="${t.id}" data-v="manual" class="${t.control === "manual" ? "on" : ""}">Manuel</button></div></div>${ctl}</div>`;
     };
@@ -289,7 +298,9 @@ class ChauffageManagerCard extends HTMLElement {
     const hs = this._data.heaters.map((h) => row("heater", h, `${h.type === "pilot_wire" ? "Fil pilote" : "Thermostat"} · ${esc(h.entity)}`, "radiator")).join("") || `<div class="muted">Aucun chauffage.</div>`;
     const gs = this._data.groups.map((g) => row("group", g, g.members.map((m) => esc(this._data.heaters.find((h) => h.id === m)?.name || m)).join(" + "), "radiator-disabled")).join("") || `<div class="muted">Aucun groupe.</div>`;
     return `<div class="sub" style="margin-top:0">Chauffages</div>${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>
-      <div class="sub">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>`;
+      <div class="sub">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>
+      <div class="sub">Ouvertures</div><div class="hint">Quand une ouverture reste ouverte au-delà du délai, le chauffage passe en pause puis reprend sa consigne à la fermeture. Les ouvertures se choisissent dans chaque chauffage ou groupe.</div><div data-form="openings"></div>
+      <div class="actions"><button class="btn primary" data-a="opn-save">Enregistrer</button></div>`;
   }
 
   /* ---------- formulaires Home Assistant (ha-form) ---------- */
@@ -307,6 +318,19 @@ class ChauffageManagerCard extends HTMLElement {
         ],
         labels: { persons: "Personnes", mode: "Mode du chauffage en absence", control: "Programmation en absence", restore: "Restaurer l'état au retour" },
         change: (v) => { this._abs = { ...this._abs, ...v }; this._absDirty = true; },
+      };
+    }
+    if (kind === "openings") {
+      const num = { number: { min: 0, max: 120, step: 1, unit_of_measurement: "min", mode: "box" } };
+      return {
+        data: this._opn,
+        schema: [
+          { name: "delay", required: true, selector: num },
+          { name: "resume_delay", required: true, selector: num },
+          { name: "mode", required: true, selector: dropdown(MODE_OPTIONS) },
+        ],
+        labels: { delay: "Délai avant la pause", resume_delay: "Délai avant la reprise", mode: "Mode pendant l'ouverture" },
+        change: (v) => { this._opn = { ...this._opn, ...v }; this._opnDirty = true; },
       };
     }
     if (kind === "sched") {
@@ -354,7 +378,7 @@ class ChauffageManagerCard extends HTMLElement {
         entitySel = { entity: ids.length ? { include_entities: ids } : { domain: "select" } };
       }
       return {
-        data: { name: e.name, floor: e.floor || undefined, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature },
+        data: { name: e.name, floor: e.floor || undefined, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature, openings: e.openings || [] },
         schema: [
           { name: "name", required: true, selector: text },
           { name: "floor", selector: this._floorSelector() },
@@ -362,25 +386,27 @@ class ChauffageManagerCard extends HTMLElement {
           { name: "entity", required: true, selector: entitySel },
           ...(pilot ? [{ name: "climate", selector: { entity: { domain: "climate" } } }]
             : [{ name: "absence_temperature", selector: { number: { min: 5, max: 30, step: 0.5, unit_of_measurement: "°C", mode: "box" } } }]),
+          { name: "openings", selector: { entity: { domain: "binary_sensor", multiple: true } } },
         ],
-        labels: { name: "Nom", floor: "Étage (optionnel)", type: "Type", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence" },
+        labels: { name: "Nom", floor: "Étage (optionnel)", type: "Type", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence", openings: "Ouvertures (fenêtres, portes) qui mettent en pause" },
         change: (v) => {
           const typeChanged = v.type !== e.type;
-          Object.assign(e, { name: v.name || "", floor: v.floor || "", type: v.type, entity: v.entity || "", climate: v.climate || "", absence_temperature: v.absence_temperature ?? e.absence_temperature });
+          Object.assign(e, { name: v.name || "", floor: v.floor || "", type: v.type, entity: v.entity || "", climate: v.climate || "", openings: v.openings || [], absence_temperature: v.absence_temperature ?? e.absence_temperature });
           if (typeChanged) { e.entity = ""; e.climate = ""; this._render(); }
         },
       };
     }
     if (kind === "group") {
       return {
-        data: { name: e.name, floor: e.floor || undefined, members: e.members },
+        data: { name: e.name, floor: e.floor || undefined, members: e.members, openings: e.openings || [] },
         schema: [
           { name: "name", required: true, selector: text },
           { name: "floor", selector: this._floorSelector() },
           { name: "members", selector: { select: { multiple: true, mode: "list", options: this._data.heaters.map((h) => ({ value: h.id, label: h.name })) } } },
+          { name: "openings", selector: { entity: { domain: "binary_sensor", multiple: true } } },
         ],
-        labels: { name: "Nom", floor: "Étage (optionnel)", members: "Chauffages synchronisés (un chauffage appartient à un seul groupe)" },
-        change: (v) => { e.name = v.name || ""; e.floor = v.floor || ""; e.members = v.members || []; },
+        labels: { name: "Nom", floor: "Étage (optionnel)", members: "Chauffages synchronisés (un chauffage appartient à un seul groupe)", openings: "Ouvertures (fenêtres, portes) qui mettent en pause" },
+        change: (v) => { e.name = v.name || ""; e.floor = v.floor || ""; e.members = v.members || []; e.openings = v.openings || []; },
       };
     }
   }
@@ -404,8 +430,8 @@ class ChauffageManagerCard extends HTMLElement {
   _blank(kind) {
     return {
       schedule: { kind, id: null, name: "", slots: [{ days: [0, 1, 2, 3, 4], time: "06:30", mode: "comfort", temperature: 19 }, { days: [0, 1, 2, 3, 4], time: "22:00", mode: "eco", temperature: 17 }] },
-      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", absence_temperature: 12, schedule_id: null, floor: "" },
-      group: { kind, id: null, name: "", members: [], schedule_id: null, floor: "" },
+      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", absence_temperature: 12, schedule_id: null, floor: "", openings: [] },
+      group: { kind, id: null, name: "", members: [], schedule_id: null, floor: "", openings: [] },
     }[kind];
   }
   async _click(e) {
@@ -448,6 +474,13 @@ class ChauffageManagerCard extends HTMLElement {
           this._absDirty = false; await this._load();
         } catch (err) { this._toast(err); }
         break;
+      case "opn-save":
+        try {
+          const o = this._opn;
+          await this._ws({ type: "chauffage_manager/save", kind: "openings", value: { delay: Number(o.delay) || 0, resume_delay: Number(o.resume_delay) || 0, mode: o.mode } });
+          this._opnDirty = false; await this._load();
+        } catch (err) { this._toast(err); }
+        break;
       case "day": {
         const s = this._edit.slots[+d.i], n = +d.d;
         s.days = s.days.includes(n) ? s.days.filter((x) => x !== n) : [...s.days, n].sort();
@@ -468,9 +501,9 @@ class ChauffageManagerCard extends HTMLElement {
       value = { name: e.name.trim(), slots: e.slots.map((s) => ({ days: s.days, time: s.time, mode: s.mode, temperature: s.temperature === "" || s.temperature == null ? null : Number(s.temperature) })) };
     } else if (e.kind === "heater") {
       if (!e.entity) return this._toast("Entité requise");
-      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12, floor: e.floor || null };
+      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12, floor: e.floor || null, openings: e.openings || [] };
     } else {
-      value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null, floor: e.floor || null };
+      value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null, floor: e.floor || null, openings: e.openings || [] };
     }
     try {
       await this._ws({ type: "chauffage_manager/save", kind: e.kind, item_id: e.id || undefined, value });
@@ -478,6 +511,41 @@ class ChauffageManagerCard extends HTMLElement {
     } catch (err) { this._toast(err); }
   }
 }
+
+const EDITOR_SCHEMA = [
+  { name: "title", selector: { text: {} } },
+  { name: "tabs", selector: { select: { multiple: true, mode: "list", options: Object.entries(TABS).map(([value, label]) => ({ value, label })) } } },
+  { name: "group_by_floor", selector: { boolean: {} } },
+];
+const EDITOR_LABELS = { title: "Titre (optionnel)", tabs: "Onglets affichés", group_by_floor: "Séparer les pièces par étage" };
+class ChauffageManagerCardEditor extends HTMLElement {
+  setConfig(config) { this._config = config || {}; this._render(); }
+  set hass(hass) { this._hass = hass; if (this._form) this._form.hass = hass; }
+  async _render() {
+    if (!(await ensureHA())) { this.innerHTML = "<div>Composants Home Assistant indisponibles</div>"; return; }
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.schema = EDITOR_SCHEMA;
+      this._form.computeLabel = (s) => EDITOR_LABELS[s.name] || s.name;
+      this._form.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        const v = ev.detail.value, order = Object.keys(TABS);
+        const tabs = order.filter((t) => (v.tabs || []).includes(t));
+        const config = { ...this._config };
+        delete config.title; delete config.tabs; delete config.group_by_floor;
+        if (v.title) config.title = v.title;
+        if (tabs.length && tabs.length < order.length) config.tabs = tabs;
+        if (v.group_by_floor) config.group_by_floor = true;
+        this._config = config;
+        this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
+      });
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.data = { title: this._config.title || "", tabs: this._config.tabs || Object.keys(TABS), group_by_floor: !!this._config.group_by_floor };
+  }
+}
+if (!customElements.get("chauffage-manager-card-editor")) customElements.define("chauffage-manager-card-editor", ChauffageManagerCardEditor);
 if (!customElements.get("chauffage-manager-card")) customElements.define("chauffage-manager-card", ChauffageManagerCard);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "chauffage-manager-card", name: "Chauffage Manager", description: "Pièces, plannings, groupes et absence des chauffages" });
