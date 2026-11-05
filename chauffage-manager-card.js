@@ -233,11 +233,12 @@ class ChauffageManagerCard extends HTMLElement {
     if (!d.targets.length) return `<div class="muted">Aucun chauffage configuré. Ajoutez-en dans l'onglet Configuration.</div>`;
     const rowHtml = (t) => {
       const i = this._info(t);
-      const m = i.mode && MODE[i.mode];
+      const onlyThermo = i.hs.length > 0 && i.hs.every((h) => h.type === "thermostat");
+      const m = onlyThermo ? (i.mode === "off" ? MODE.off : i.mode ? { label: "Chauffe", color: MODE.comfort.color } : null) : i.mode && MODE[i.mode];
       const sub = t.kind === "group" ? `<small>${i.hs.map((h) => esc(h.name)).join(" + ")}</small>` : "";
       let ctl;
       if (t.control === "manual") {
-        const chips = MODES.map((x) => `<button class="chip ${i.mode === x[0] ? "on" : ""}" style="--c:${x[2]}" data-a="mode" data-t="${t.id}" data-v="${x[0]}">${x[1]}</button>`).join("");
+        const chips = (onlyThermo ? MODES.filter((x) => x[0] === "off") : MODES).map((x) => `<button class="chip ${i.mode === x[0] ? "on" : ""}" style="--c:${x[2]}" data-a="mode" data-t="${t.id}" data-v="${x[0]}">${x[1]}</button>`).join("");
         const step = i.thermo ? `<span class="step"><button class="ib" data-a="temp" data-t="${t.id}" data-d="-0.5">${this._icon("minus")}</button><b>${this._tempOf(t).toFixed(1)}°C</b><button class="ib" data-a="temp" data-t="${t.id}" data-d="0.5">${this._icon("plus")}</button></span>` : "";
         ctl = `<div class="chips">${chips}${step}</div>`;
       } else {
