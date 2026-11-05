@@ -9,13 +9,29 @@ Carte Lovelace pour l'intégration [Chauffage Manager](https://github.com/Mookun
 2. HACS → menu ⋮ → **Dépôts personnalisés** → `https://github.com/Mookunicorn/chauffage-manager-card`, catégorie **Tableau de bord**.
 3. Télécharger **Chauffage Manager Card** (la ressource est ajoutée automatiquement), puis recharger la page sans cache.
 
-## Ajout à un tableau de bord
-Mode édition → **Ajouter une carte** → **Chauffage Manager** : un formulaire permet de régler le titre, les onglets affichés et le tri par étage. Le YAML reste possible :
+## Configuration de la carte
+Mode édition → **Ajouter une carte** → **Chauffage Manager** : un formulaire propose toutes les options, sans YAML :
+
+| Option | Effet | Défaut |
+|---|---|---|
+| `title` | Titre de la carte | aucun |
+| `tabs` | Onglets affichés (`rooms`, `schedules`, `absence`, `config`) | tous |
+| `default_tab` | Onglet ouvert au chargement | premier onglet |
+| `group_by_floor` | Séparateurs par étage | non |
+| `show_power` | Affiche la puissance (W) | oui |
+| `show_temperature` | Affiche la température mesurée | oui |
+| `show_mode` | Affiche le badge de mode | oui |
+| `show_all_off` | Bouton « Tout éteindre » | oui |
+| `heating_color` | Couleur de l'icône quand ça chauffe (couleur du thème, ex. `orange`) | couleur de chauffe du thème |
+| `temp_step` | Pas du réglage de température (0.5 ou 1) | 0.5 |
+
+Le YAML reste possible :
 ```yaml
 type: custom:chauffage-manager-card
-title: Chauffage                            # optionnel
-tabs: [rooms, schedules, absence, config]   # optionnel, ex. [rooms] pour une carte « pièces » seule
-group_by_floor: true                        # optionnel : sépare les pièces par étage
+title: Chauffage
+tabs: [rooms]
+show_power: false
+heating_color: deep-orange
 ```
 Les onglets Plannings (édition), Absence (enregistrement) et Configuration sont réservés aux administrateurs.
 

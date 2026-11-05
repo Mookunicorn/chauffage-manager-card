@@ -9,6 +9,8 @@ const PILOT = { Off: "off", FrostProtection: "frost_protection", Eco: "eco", Com
 const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
 const TABS = { rooms: "Pièces", schedules: "Plannings", absence: "Absence", config: "Configuration" };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const CARD_DEFAULTS = { show_power: true, show_temperature: true, show_mode: true, show_all_off: true, group_by_floor: false, temp_step: 0.5 };
+const cssColor = (v) => (!v || v === "state" ? "" : /^(#|rgb|hsl|var\()/.test(v) ? v : `var(--${v}-color)`);
 const toMin = (t) => { const [h, m] = t.split(":"); return +h * 60 + +m; };
 
 function slotAt(slots, weekday, minute) {
@@ -57,9 +59,9 @@ ha-card{overflow:hidden}
 .name{font-weight:500;flex:1;min-width:110px;color:var(--primary-text-color)}
 .name small{display:block;font-weight:400;color:var(--secondary-text-color);font-size:.85em}
 .temp{color:var(--secondary-text-color)}
-.head>ha-icon.heating{color:var(--state-climate-heat-color,#ff8c00)}
+.head>ha-icon.heating{color:var(--heat-color,var(--state-climate-heat-color,#ff8c00))}
 .pw{display:inline-flex;align-items:center;gap:2px;color:var(--secondary-text-color);font-size:.85em}
-.pw.on{color:var(--state-climate-heat-color,#ff8c00);font-weight:500}
+.pw.on{color:var(--heat-color,var(--state-climate-heat-color,#ff8c00));font-weight:500}
 .pw ha-icon{--mdc-icon-size:14px}
 .badge.warn{background:var(--warning-color,#ff9800)}
 .badge{padding:3px 10px;border-radius:12px;color:#fff;font-size:.8em;font-weight:500}
@@ -129,7 +131,7 @@ class ChauffageManagerCard extends HTMLElement {
   }
   setConfig(config) {
     this._config = { tabs: ["rooms", "schedules", "absence", "config"], ...config };
-    if (!this._tab || !this._config.tabs.includes(this._tab)) this._tab = this._config.tabs[0];
+    if (!this._tab || !this._config.tabs.includes(this._tab)) this._tab = this._config.tabs.includes(this._config.default_tab) ? this._config.default_tab : this._config.tabs[0];
     this._render();
   }
   getCardSize() { return 6; }
@@ -224,7 +226,8 @@ class ChauffageManagerCard extends HTMLElement {
     if (!tabs.includes(this._tab)) this._tab = tabs[0];
     const bar = tabs.length > 1 ? `<div class="tabs">${tabs.map((t) => `<button data-a="tab" data-v="${t}" class="${t === this._tab ? "on" : ""}">${TABS[t]}</button>`).join("")}</div>` : "";
     const body = !this._data ? `<div class="muted">${this._error ? "" : "Chargement…"}</div>` : this[`_v_${this._tab}`]();
-    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${this._config.title ? `<div class="title">${esc(this._config.title)}</div>` : ""}${bar}<div class="wrap">${this._error ? `<div class="err">${esc(this._error)}</div>` : ""}${body}</div></ha-card>`;
+    const hc = cssColor(this._config.heating_color);
+    this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card${hc ? ` style="--heat-color:${esc(hc)}"` : ""}>${this._config.title ? `<div class="title">${esc(this._config.title)}</div>` : ""}${bar}<div class="wrap">${this._error ? `<div class="err">${esc(this._error)}</div>` : ""}${body}</div></ha-card>`;
     this._mountForms();
   }
 
@@ -242,6 +245,8 @@ class ChauffageManagerCard extends HTMLElement {
   _v_rooms() {
     const d = this._data;
     if (!d.targets.length) return `<div class="muted">Aucun chauffage configuré. Ajoutez-en dans l'onglet Configuration.</div>`;
+    const cfg = this._config;
+    const tStep = Number(cfg.temp_step) || 0.5;
     const rowHtml = (t) => {
       const i = this._info(t);
       const onlyThermo = i.hs.length > 0 && i.hs.every((h) => h.type === "thermostat");
@@ -250,16 +255,16 @@ class ChauffageManagerCard extends HTMLElement {
       let ctl;
       if (t.control === "manual") {
         const chips = (onlyThermo ? MODES.filter((x) => x[0] === "off") : MODES).map((x) => `<button class="chip ${i.mode === x[0] ? "on" : ""}" style="--c:${x[2]}" data-a="mode" data-t="${t.id}" data-v="${x[0]}">${x[1]}</button>`).join("");
-        const step = i.thermo ? `<span class="step"><button class="ib" data-a="temp" data-t="${t.id}" data-d="-0.5">${this._icon("minus")}</button><b>${this._tempOf(t).toFixed(1)}°C</b><button class="ib" data-a="temp" data-t="${t.id}" data-d="0.5">${this._icon("plus")}</button></span>` : "";
+        const step = i.thermo ? `<span class="step"><button class="ib" data-a="temp" data-t="${t.id}" data-d="-${tStep}">${this._icon("minus")}</button><b>${this._tempOf(t).toFixed(1)}°C</b><button class="ib" data-a="temp" data-t="${t.id}" data-d="${tStep}">${this._icon("plus")}</button></span>` : "";
         ctl = `<div class="chips">${chips}${step}</div>`;
       } else {
         ctl = `<div class="sched" data-form="sched" data-i="${t.id}"></div>`;
       }
       return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator", i.heating ? "heating" : "")}<div class="name">${esc(t.name)}${sub}</div>
-        ${i.power != null ? `<span class="pw ${i.heating ? "on" : ""}">${this._icon("flash")}${Math.round(i.power)} W</span>` : ""}
-        ${i.cur != null ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
+        ${i.power != null && cfg.show_power !== false ? `<span class="pw ${i.heating ? "on" : ""}">${this._icon("flash")}${Math.round(i.power)} W</span>` : ""}
+        ${i.cur != null && cfg.show_temperature !== false ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
         ${t.paused ? `<span class="badge warn">En pause (ouverture)</span>` : ""}
-        ${m ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
+        ${m && cfg.show_mode !== false ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
         <div class="seg"><button data-a="control" data-t="${t.id}" data-v="auto" class="${t.control === "auto" ? "on" : ""}">Auto</button><button data-a="control" data-t="${t.id}" data-v="manual" class="${t.control === "manual" ? "on" : ""}">Manuel</button></div></div>${ctl}</div>`;
     };
     const floorOf = (t) => (t.kind === "group" ? d.groups : d.heaters).find((x) => x.id === t.id)?.floor || "";
@@ -271,7 +276,7 @@ class ChauffageManagerCard extends HTMLElement {
       rows = keys.map((k) => `<div class="floor">${esc(k || "Sans étage")}</div>${byFloor.get(k).map(rowHtml).join("")}`).join("");
     } else rows = d.targets.map(rowHtml).join("");
     const banner = d.absence.active ? `<div class="info">${this._icon("home-export-outline")}Mode absence actif</div>` : "";
-    return `${banner}${rows}<div class="actions"><button class="btn" data-a="alloff">${this._icon("power")}Tout éteindre</button></div>`;
+    return `${banner}${rows}${cfg.show_all_off !== false ? `<div class="actions"><button class="btn" data-a="alloff">${this._icon("power")}Tout éteindre</button></div>` : ""}`;
   }
 
   _v_schedules() {
@@ -527,37 +532,63 @@ class ChauffageManagerCard extends HTMLElement {
   }
 }
 
+const TAB_OPTIONS = Object.entries(TABS).map(([value, label]) => ({ value, label }));
+const bool = { boolean: {} };
 const EDITOR_SCHEMA = [
   { name: "title", selector: { text: {} } },
-  { name: "tabs", selector: { select: { multiple: true, mode: "list", options: Object.entries(TABS).map(([value, label]) => ({ value, label })) } } },
-  { name: "group_by_floor", selector: { boolean: {} } },
+  { name: "tabs", selector: { select: { multiple: true, mode: "list", options: TAB_OPTIONS } } },
+  { name: "default_tab", selector: { select: { mode: "dropdown", options: TAB_OPTIONS } } },
+  { name: "group_by_floor", selector: bool },
+  { type: "grid", name: "", flatten: true, schema: [
+    { name: "show_power", selector: bool }, { name: "show_temperature", selector: bool },
+    { name: "show_mode", selector: bool }, { name: "show_all_off", selector: bool },
+  ] },
+  { name: "heating_color", selector: { ui_color: {} } },
+  { name: "temp_step", selector: { select: { mode: "dropdown", options: [{ value: "0.5", label: "0,5 °C" }, { value: "1", label: "1 °C" }] } } },
 ];
-const EDITOR_LABELS = { title: "Titre (optionnel)", tabs: "Onglets affichés", group_by_floor: "Séparer les pièces par étage" };
+const EDITOR_LABELS = {
+  title: "Titre (optionnel)", tabs: "Onglets affichés", default_tab: "Onglet affiché par défaut",
+  group_by_floor: "Séparer les pièces par étage", show_power: "Afficher la puissance (W)",
+  show_temperature: "Afficher la température", show_mode: "Afficher le badge de mode", show_all_off: "Bouton « Tout éteindre »",
+  heating_color: "Couleur de l'icône quand le chauffage chauffe", temp_step: "Pas du réglage de température",
+};
+const EDITOR_KEYS = ["title", "tabs", "default_tab", "group_by_floor", "show_power", "show_temperature", "show_mode", "show_all_off", "heating_color", "temp_step"];
 class ChauffageManagerCardEditor extends HTMLElement {
   setConfig(config) { this._config = config || {}; this._render(); }
   set hass(hass) { this._hass = hass; if (this._form) this._form.hass = hass; }
+  _formData() {
+    const c = this._config, order = Object.keys(TABS);
+    const tabs = c.tabs || order;
+    const data = { title: c.title || "", tabs, default_tab: c.default_tab && tabs.includes(c.default_tab) ? c.default_tab : tabs[0], heating_color: c.heating_color || undefined, temp_step: String(c.temp_step ?? 0.5) };
+    ["group_by_floor", "show_power", "show_temperature", "show_mode", "show_all_off"].forEach((k) => { data[k] = c[k] ?? CARD_DEFAULTS[k]; });
+    return data;
+  }
+  _changed(v) {
+    const order = Object.keys(TABS);
+    const tabs = order.filter((t) => (v.tabs || []).includes(t));
+    const config = { ...this._config };
+    EDITOR_KEYS.forEach((k) => delete config[k]);
+    if (v.title) config.title = v.title;
+    if (tabs.length && tabs.length < order.length) config.tabs = tabs;
+    if (v.default_tab && v.default_tab !== (tabs.length ? tabs[0] : order[0])) config.default_tab = v.default_tab;
+    ["group_by_floor", "show_power", "show_temperature", "show_mode", "show_all_off"].forEach((k) => { if (v[k] !== undefined && v[k] !== CARD_DEFAULTS[k]) config[k] = v[k]; });
+    if (v.heating_color) config.heating_color = v.heating_color;
+    const step = Number(v.temp_step);
+    if (step && step !== 0.5) config.temp_step = step;
+    this._config = config;
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
+  }
   async _render() {
     if (!(await ensureHA())) { this.innerHTML = "<div>Composants Home Assistant indisponibles</div>"; return; }
     if (!this._form) {
       this._form = document.createElement("ha-form");
       this._form.schema = EDITOR_SCHEMA;
       this._form.computeLabel = (s) => EDITOR_LABELS[s.name] || s.name;
-      this._form.addEventListener("value-changed", (ev) => {
-        ev.stopPropagation();
-        const v = ev.detail.value, order = Object.keys(TABS);
-        const tabs = order.filter((t) => (v.tabs || []).includes(t));
-        const config = { ...this._config };
-        delete config.title; delete config.tabs; delete config.group_by_floor;
-        if (v.title) config.title = v.title;
-        if (tabs.length && tabs.length < order.length) config.tabs = tabs;
-        if (v.group_by_floor) config.group_by_floor = true;
-        this._config = config;
-        this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
-      });
+      this._form.addEventListener("value-changed", (ev) => { ev.stopPropagation(); this._form.data = ev.detail.value; this._changed(ev.detail.value); });
       this.appendChild(this._form);
     }
     this._form.hass = this._hass;
-    this._form.data = { title: this._config.title || "", tabs: this._config.tabs || Object.keys(TABS), group_by_floor: !!this._config.group_by_floor };
+    this._form.data = this._formData();
   }
 }
 if (!customElements.get("chauffage-manager-card-editor")) customElements.define("chauffage-manager-card-editor", ChauffageManagerCardEditor);
