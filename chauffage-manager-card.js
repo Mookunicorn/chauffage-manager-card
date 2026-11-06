@@ -105,6 +105,23 @@ ha-card{overflow:hidden}
 .li{display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--divider-color)}
 .li:last-of-type{border-bottom:none}
 .li .name{flex:1}
+
+.btn,.ib,.chip,.seg button,.tabs button,.days button{position:relative;overflow:hidden;transition:background-color .2s,color .2s,box-shadow .2s,border-color .2s,transform .1s,opacity .2s;-webkit-tap-highlight-color:transparent}
+.btn:hover,.chip:hover,.seg button:hover,.tabs button:hover,.days button:hover{background-color:color-mix(in srgb,var(--primary-color) 12%,transparent)}
+.btn.primary:hover,.seg button.on:hover,.days button.on:hover{background-color:var(--primary-color);filter:brightness(1.12);box-shadow:var(--ha-card-box-shadow,0 2px 6px rgba(0,0,0,.25))}
+.chip.on:hover{background-color:var(--c);filter:brightness(1.1)}
+.btn:active,.ib:active,.chip:active,.days button:active{transform:scale(.96)}
+.btn:focus-visible,.ib:focus-visible,.chip:focus-visible,.seg button:focus-visible,.tabs button:focus-visible,.days button:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}
+.btn[disabled]{pointer-events:none}
+.rip{position:absolute;border-radius:50%;background:currentColor;opacity:.3;transform:scale(0);pointer-events:none;animation:rip .55s ease-out forwards}
+@keyframes rip{to{transform:scale(2);opacity:0}}
+.btn.busy{opacity:.85}
+.btn.ok{background:var(--success-color,#43a047);border-color:var(--success-color,#43a047);color:#fff}
+.btn.ko{background:var(--error-color,#db4437);border-color:var(--error-color,#db4437);color:#fff;animation:shake .4s}
+.spin{width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.row,.slot{transition:box-shadow .2s,border-color .2s}
 `;
 
 async function ensureHA() {
@@ -126,8 +143,10 @@ class ChauffageManagerCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._data = null; this._edit = null; this._abs = null; this._absDirty = false;
     this._temps = {}; this._error = ""; this._sig = ""; this._tab = null; this._forms = [];
+    this._btnState = {}; this._btnT = {};
     const r = this.shadowRoot;
     r.addEventListener("click", (e) => this._click(e));
+    r.addEventListener("pointerdown", (e) => this._ripple(e));
   }
   setConfig(config) {
     this._config = { tabs: ["rooms", "schedules", "absence", "config"], ...config };
@@ -240,6 +259,27 @@ class ChauffageManagerCard extends HTMLElement {
     [...this._data.heaters, ...this._data.groups].forEach((x) => x.floor && names.add(x.floor));
     return names.size ? { select: { custom_value: true, mode: "dropdown", options: [...names].map((n) => ({ value: n, label: n })) } } : { text: {} };
   }
+  _ripple(e) {
+    const el = e.target.closest(".btn,.ib,.chip,.seg button,.tabs button,.days button");
+    if (!el || el.disabled) return;
+    const r = el.getBoundingClientRect(), size = Math.max(r.width, r.height) * 2;
+    const s = document.createElement("span");
+    s.className = "rip";
+    s.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - r.left - size / 2}px;top:${e.clientY - r.top - size / 2}px`;
+    el.appendChild(s);
+    s.addEventListener("animationend", () => s.remove());
+  }
+  _setBtn(action, state, ms) {
+    this._btnState = { ...this._btnState, [action]: state };
+    this._render();
+    clearTimeout(this._btnT[action]);
+    if (ms) this._btnT[action] = setTimeout(() => { this._btnState = { ...this._btnState, [action]: "" }; this._render(); }, ms);
+  }
+  _saveBtn(action, label = "Enregistrer") {
+    const st = this._btnState[action] || "";
+    const icon = st === "busy" ? `<span class="spin"></span>` : st === "ok" ? this._icon("check") : st === "ko" ? this._icon("alert-circle-outline") : "";
+    return `<button class="btn primary ${st}" data-a="${action}" ${st === "busy" ? "disabled" : ""}>${icon}${st === "ok" ? "Enregistré" : label}</button>`;
+  }
   _icon(name, cls = "") { return `<ha-icon${cls ? ` class="${cls}"` : ""} icon="mdi:${name}"></ha-icon>`; }
 
   _v_rooms() {
@@ -290,7 +330,7 @@ class ChauffageManagerCard extends HTMLElement {
         <div class="hint">Chaque créneau s'applique à partir de son heure jusqu'au suivant. La température ne concerne que les thermostats.</div>${slots}
         <div class="actions" style="justify-content:flex-start"><button class="btn" data-a="addslot">${this._icon("plus")}Créneau</button></div>
         <div id="pv">${timeline(e)}</div>
-        <div class="actions"><button class="btn text" data-a="cancel">Annuler</button><button class="btn primary" data-a="save">Enregistrer</button></div>`;
+        <div class="actions"><button class="btn text" data-a="cancel">Annuler</button>${this._saveBtn("save")}</div>`;
     }
     const list = this._data.schedules.map((s) => {
       const users = this._data.targets.filter((t) => t.schedule_id === s.id).map((t) => esc(t.name)).join(", ");
@@ -303,14 +343,14 @@ class ChauffageManagerCard extends HTMLElement {
 
   _v_absence() {
     const status = this._data.absence.active ? `<div class="info">${this._icon("home-export-outline")}Absence en cours</div>` : `<div class="hint">Absence = plus aucune des personnes sélectionnées à la maison.</div>`;
-    return `${status}<div data-form="absence"></div>${this._admin() ? `<div class="actions"><button class="btn primary" data-a="abs-save">Enregistrer</button></div>` : ""}`;
+    return `${status}<div data-form="absence"></div>${this._admin() ? `<div class="actions">${this._saveBtn("abs-save")}</div>` : ""}`;
   }
 
   _v_config() {
     const e = this._edit;
     if (e && (e.kind === "heater" || e.kind === "group")) {
       return `<div class="sub">${e.id ? "Modifier" : "Nouveau"} ${e.kind === "heater" ? "chauffage" : "groupe"}</div><div data-form="${e.kind}"></div>
-        <div class="actions"><button class="btn text" data-a="cancel">Annuler</button><button class="btn primary" data-a="save">Enregistrer</button></div>`;
+        <div class="actions"><button class="btn text" data-a="cancel">Annuler</button>${this._saveBtn("save")}</div>`;
     }
     const row = (k, x, sub, icon) => `<div class="li">${this._icon(icon)}<div class="name">${esc(x.name)}<small>${sub}</small></div><button class="ib" data-a="edit" data-k="${k}" data-id="${x.id}" title="Modifier">${this._icon("pencil")}</button><button class="ib danger" data-a="del" data-k="${k}" data-id="${x.id}" title="Supprimer">${this._icon("delete")}</button></div>`;
     const hs = this._data.heaters.map((h) => row("heater", h, `${h.type === "pilot_wire" ? "Fil pilote" : "Thermostat"} · ${esc(h.entity)}`, "radiator")).join("") || `<div class="muted">Aucun chauffage.</div>`;
@@ -318,7 +358,7 @@ class ChauffageManagerCard extends HTMLElement {
     return `<div class="sub" style="margin-top:0">Chauffages</div>${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>
       <div class="sub">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>
       <div class="sub">Ouvertures</div><div class="hint">Quand une ouverture reste ouverte au-delà du délai, le chauffage passe en pause puis reprend sa consigne à la fermeture. Les ouvertures se choisissent dans chaque chauffage ou groupe.</div><div data-form="openings"></div>
-      <div class="actions"><button class="btn primary" data-a="opn-save">Enregistrer</button></div>`;
+      <div class="actions">${this._saveBtn("opn-save")}</div>`;
   }
 
   /* ---------- formulaires Home Assistant (ha-form) ---------- */
@@ -335,7 +375,10 @@ class ChauffageManagerCard extends HTMLElement {
           { name: "restore", selector: { boolean: {} } },
         ],
         labels: { persons: "Personnes", mode: "Mode du chauffage en absence", control: "Programmation en absence", restore: "Restaurer l'état au retour" },
-        change: (v) => { this._abs = { ...this._abs, ...v }; this._absDirty = true; },
+        change: (v) => {
+          this._abs = { ...this._abs, ...v }; this._absDirty = true;
+          if (this._data?.absence?.active && this._admin()) { clearTimeout(this._absT); this._absT = setTimeout(() => this._saveAbsence(), 600); }
+        },
       };
     }
     if (kind === "openings") {
@@ -487,20 +530,8 @@ class ChauffageManagerCard extends HTMLElement {
         break;
       case "cancel": this._edit = null; this._render(); break;
       case "save": this._save(); break;
-      case "abs-save":
-        try {
-          const a = this._abs;
-          await this._ws({ type: "chauffage_manager/save", kind: "absence", value: { persons: a.persons || [], mode: a.mode, control: a.control, restore: !!a.restore } });
-          this._absDirty = false; await this._load();
-        } catch (err) { this._toast(err); }
-        break;
-      case "opn-save":
-        try {
-          const o = this._opn;
-          await this._ws({ type: "chauffage_manager/save", kind: "openings", value: { delay: Number(o.delay) || 0, resume_delay: Number(o.resume_delay) || 0, mode: o.mode } });
-          this._opnDirty = false; await this._load();
-        } catch (err) { this._toast(err); }
-        break;
+      case "abs-save": this._saveAbsence(); break;
+      case "opn-save": this._saveOpenings(); break;
       case "day": {
         const s = this._edit.slots[+d.i], n = +d.d;
         s.days = s.days.includes(n) ? s.days.filter((x) => x !== n) : [...s.days, n].sort();
@@ -511,6 +542,24 @@ class ChauffageManagerCard extends HTMLElement {
       case "addslot": this._edit.slots.push({ days: [0, 1, 2, 3, 4, 5, 6], time: "12:00", mode: "comfort", temperature: 19 }); this._render(); break;
       case "delslot": this._edit.slots.splice(+d.i, 1); this._render(); break;
     }
+  }
+  async _saveAbsence() {
+    const a = this._abs;
+    this._setBtn("abs-save", "busy");
+    try {
+      await this._ws({ type: "chauffage_manager/save", kind: "absence", value: { persons: a.persons || [], mode: a.mode, control: a.control, restore: !!a.restore } });
+      this._absDirty = false; await this._load();
+      this._setBtn("abs-save", "ok", 1500);
+    } catch (err) { this._setBtn("abs-save", "ko", 2000); this._toast(err); }
+  }
+  async _saveOpenings() {
+    const o = this._opn;
+    this._setBtn("opn-save", "busy");
+    try {
+      await this._ws({ type: "chauffage_manager/save", kind: "openings", value: { delay: Number(o.delay) || 0, resume_delay: Number(o.resume_delay) || 0, mode: o.mode } });
+      this._opnDirty = false; await this._load();
+      this._setBtn("opn-save", "ok", 1500);
+    } catch (err) { this._setBtn("opn-save", "ko", 2000); this._toast(err); }
   }
   async _save() {
     const e = this._edit;
@@ -525,10 +574,11 @@ class ChauffageManagerCard extends HTMLElement {
     } else {
       value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null, floor: e.floor || null, openings: e.openings || [] };
     }
+    this._setBtn("save", "busy");
     try {
       await this._ws({ type: "chauffage_manager/save", kind: e.kind, item_id: e.id || undefined, value });
-      this._edit = null; await this._load();
-    } catch (err) { this._toast(err); }
+      this._edit = null; this._btnState = { ...this._btnState, save: "" }; await this._load();
+    } catch (err) { this._setBtn("save", "ko", 2000); this._toast(err); }
   }
 }
 
