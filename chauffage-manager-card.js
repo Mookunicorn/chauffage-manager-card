@@ -31,20 +31,24 @@ function slotAt(slots, weekday, minute, hol = false) {
   return null;
 }
 
-function timeline(sched, hol = false) {
+function timeline(sched) {
   const slots = sched.slots.filter((s) => s.time);
-  const rows = [0, 1, 2, 3, 4, 5, 6].map((d) => {
-    const holSlots = slots.filter((s) => s.holiday && s.days.includes(d));
-    const own = hol && holSlots.length ? holSlots : slots.filter((s) => !s.holiday && s.days.includes(d));
-    const pts = [...new Set([0, ...own.map((s) => toMin(s.time))])].sort((a, b) => a - b);
+  const row = (label, pts, at, title = "") => {
     const segs = pts.map((p, i) => {
       const end = i + 1 < pts.length ? pts[i + 1] : 1440;
-      const s = slotAt(slots, d, p, hol);
+      const s = at(p);
       const c = s ? MODE[s.mode].color : "transparent";
       return `<i style="width:${(end - p) / 14.4}%;background:${c}" title="${s ? MODE[s.mode].label : ""}"></i>`;
     }).join("");
-    return `<div class="tr"><b>${DAYS[d]}</b><div class="bar">${segs}</div></div>`;
-  }).join("");
+    return `<div class="tr"${title ? ` title="${title}"` : ""}><b>${label}</b><div class="bar">${segs}</div></div>`;
+  };
+  const points = (list) => [...new Set([0, ...list.map((s) => toMin(s.time))])].sort((a, b) => a - b);
+  let rows = [0, 1, 2, 3, 4, 5, 6].map((d) => row(DAYS[d], points(slots.filter((s) => !s.holiday && s.days.includes(d))), (p) => slotAt(slots, d, p))).join("");
+  const hol = slots.filter((s) => s.holiday);
+  if (hol.length) {
+    const ref = Math.min(...hol.flatMap((s) => s.days));
+    rows += row("F", points(hol.filter((s) => s.days.includes(ref))), (p) => slotAt(slots, ref, p, true), `Jour férié (créneaux fériés du ${["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"][ref]})`);
+  }
   const legend = MODES.map((m) => `<span><i style="background:${m[2]}"></i>${m[1]}</span>`).join("");
   return `<div class="tl">${rows}<div class="legend">${legend}</div></div>`;
 }
@@ -127,9 +131,9 @@ ha-card{overflow:hidden}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 .row,.slot{transition:box-shadow .2s,border-color .2s}
-.badge.phase{border:1px solid var(--pc,var(--warning-color,#ff9800));color:var(--pc,var(--warning-color,#ff9800));background:color-mix(in srgb,var(--pc,var(--warning-color,#ff9800)) 16%,transparent)}
-.badge.phase.solid{background:var(--pc,var(--warning-color,#ff9800));color:#fff}
-.badge.phase.info{--pc:var(--info-color,#039be5)}
+.badge.phase{--pc:var(--warning-color,#ff9800);border:1px solid var(--pc);color:var(--pc);background:transparent;background:color-mix(in srgb,var(--pc) 16%,transparent)}
+.badge.phase.solid{background:var(--pc);color:#fff}
+.badge.phase.resume{--pc:var(--primary-color,#03a9f4)}
 .badge.pulse{animation:pulse 1.6s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.55}}
 .sub small{font-weight:400;color:var(--secondary-text-color)}
@@ -187,7 +191,7 @@ class ChauffageManagerCard extends HTMLElement {
     if (!st) return "";
     if (st === "paused") return `<span class="badge phase solid">En pause (ouverture)</span>`;
     const pre = st === "pausing" ? "Pause dans" : "Reprise dans";
-    return `<span class="badge phase pulse ${st === "resuming" ? "info" : ""}" data-prefix="${pre}" data-left="${t.pause_in ?? 0}">${pre} ${this._fmt(t.pause_in ?? 0)}</span>`;
+    return `<span class="badge phase pulse ${st === "resuming" ? "resume" : ""}" data-prefix="${pre}" data-left="${t.pause_in ?? 0}">${pre} ${this._fmt(t.pause_in ?? 0)}</span>`;
   }
   set hass(hass) {
     this._hass = hass;
@@ -292,10 +296,8 @@ class ChauffageManagerCard extends HTMLElement {
     return names.size ? { select: { custom_value: true, mode: "dropdown", options: [...names].map((n) => ({ value: n, label: n })) } } : { text: {} };
   }
   _preview() {
-    const e = this._edit, pv = this.shadowRoot.getElementById("pv"), ph = this.shadowRoot.getElementById("pvh");
-    if (!e || !pv) return;
-    pv.innerHTML = timeline(e);
-    if (ph) ph.innerHTML = e.slots.some((x) => x.holiday) ? `<div class="sub">Aperçu jours fériés</div>${timeline(e, true)}` : "";
+    const pv = this.shadowRoot.getElementById("pv");
+    if (this._edit && pv) pv.innerHTML = timeline(this._edit);
   }
   _ripple(e) {
     const el = e.target.closest(".btn,.ib,.chip,.seg button,.tabs button,.days button");
@@ -374,7 +376,6 @@ class ChauffageManagerCard extends HTMLElement {
         <div class="hint">Un jour férié suit les créneaux fériés du jour de la semaine correspondant (ex. un férié un mercredi utilise les créneaux fériés « M » du mercredi). S'il n'y en a pas pour ce jour, le planning normal s'applique. Le calendrier des jours fériés se choisit dans Configuration.</div>${feries}
         <div class="actions" style="justify-content:flex-start"><button class="btn" data-a="addslot" data-hol="1">${this._icon("plus")}Créneau férié</button></div>
         <div id="pv">${timeline(e)}</div>
-        <div id="pvh">${e.slots.some((s) => s.holiday) ? `<div class="sub">Aperçu jours fériés</div>${timeline(e, true)}` : ""}</div>
         <div class="actions"><button class="btn text" data-a="cancel">Annuler</button>${this._saveBtn("save")}</div>`;
     }
     const list = this._data.schedules.map((s) => {
