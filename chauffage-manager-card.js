@@ -219,6 +219,7 @@ class ChauffageManagerCard extends HTMLElement {
       this._dataAt = Date.now();
       if (!this._absDirty) this._abs = JSON.parse(JSON.stringify(this._data.absence));
       if (!this._opnDirty) this._opn = { ...this._data.openings };
+      if (!this._tmpDirty) this._tmp = { ...this._data.temperatures };
       if (!this._holDirty) this._hol = { entity: this._data.holidays?.entity || undefined };
       this._error = "";
     } catch (e) { this._error = e.message || "Intégration non disponible"; }
@@ -252,7 +253,9 @@ class ChauffageManagerCard extends HTMLElement {
       return { mode: PILOT[s.state], cur: c?.attributes.current_temperature, power, heating };
     }
     if (heating == null && s.attributes.hvac_action) heating = s.attributes.hvac_action === "heating";
-    return { mode: s.state === "off" ? "off" : "comfort", temp: s.attributes.temperature, cur: s.attributes.current_temperature, power, heating };
+    const T = this._data?.temperatures || {}, target = Number(s.attributes.temperature);
+    const mode = s.state === "off" ? "off" : ["comfort", "comfort_minus_1", "comfort_minus_2", "eco", "frost_protection"].find((k) => Math.abs(Number(T[k]) - target) < 0.01) || "comfort";
+    return { mode, temp: s.attributes.temperature, cur: s.attributes.current_temperature, power, heating };
   }
   _info(t) {
     const hs = t.members.map((id) => this._data.heaters.find((h) => h.id === id)).filter(Boolean);
@@ -330,7 +333,8 @@ class ChauffageManagerCard extends HTMLElement {
     const rowHtml = (t) => {
       const i = this._info(t);
       const onlyThermo = i.hs.length > 0 && i.hs.every((h) => h.type === "thermostat");
-      const m = onlyThermo ? (i.mode === "off" ? MODE.off : i.mode ? { label: "Chauffe", color: MODE.comfort.color } : null) : i.mode && MODE[i.mode];
+      const target = i.thermo ? Number(i.thermo.temp) : 0;
+      const m = onlyThermo ? (i.mode === "off" ? MODE.off : target > 0 ? { label: `${target.toFixed(1)}°C`, color: (MODE[i.mode] || MODE.comfort).color } : null) : i.mode && MODE[i.mode];
       const sub = t.kind === "group" ? `<small>${i.hs.map((h) => esc(h.name)).join(" + ")}</small>` : "";
       let ctl;
       if (t.control === "manual") {
@@ -369,7 +373,7 @@ class ChauffageManagerCard extends HTMLElement {
       const normal = e.slots.map((s, i) => (s.holiday ? "" : slotHtml(s, i))).join("");
       const feries = e.slots.map((s, i) => (s.holiday ? slotHtml(s, i) : "")).join("");
       return `<div data-form="sname"></div>
-        <div class="hint">Chaque créneau s'applique à partir de son heure jusqu'au suivant. La température ne concerne que les thermostats.</div>
+        <div class="hint">Chaque créneau s'applique à partir de son heure jusqu'au suivant. Les thermostats prennent la température du mode (voir Configuration).</div>
         <div class="sub">Jours normaux</div>${normal}
         <div class="actions" style="justify-content:flex-start"><button class="btn" data-a="addslot">${this._icon("plus")}Créneau</button></div>
         <div class="sub">Jours fériés <small>(optionnel)</small></div>
@@ -403,6 +407,8 @@ class ChauffageManagerCard extends HTMLElement {
     const gs = this._data.groups.map((g) => row("group", g, g.members.map((m) => esc(this._data.heaters.find((h) => h.id === m)?.name || m)).join(" + "), "radiator-disabled")).join("") || `<div class="muted">Aucun groupe.</div>`;
     return `<div class="sub" style="margin-top:0">Chauffages</div>${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>
       <div class="sub">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>
+      <div class="sub">Températures des modes</div><div class="hint">Température appliquée aux thermostats (climate) pour chaque mode : boutons, plannings, absence et ouvertures. « Off » éteint simplement le thermostat.</div><div data-form="temperatures"></div>
+      <div class="actions">${this._saveBtn("tmp-save")}</div>
       <div class="sub">Jours fériés</div><div class="hint">Choisissez un calendrier de jours fériés (intégration « Jours fériés » de Home Assistant). Les plannings peuvent avoir des créneaux dédiés à ces jours.${this._data.holidays?.today ? " Aujourd'hui est un jour férié." : ""}</div><div data-form="holidays"></div>
       <div class="actions">${this._saveBtn("hol-save")}</div>
       <div class="sub">Ouvertures</div><div class="hint">Quand une ouverture reste ouverte au-delà du délai, le chauffage passe en pause puis reprend sa consigne à la fermeture. Les ouvertures se choisissent dans chaque chauffage ou groupe.</div><div data-form="openings"></div>
@@ -427,6 +433,15 @@ class ChauffageManagerCard extends HTMLElement {
           this._abs = { ...this._abs, ...v }; this._absDirty = true;
           if (this._data?.absence?.active && this._admin()) { clearTimeout(this._absT); this._absT = setTimeout(() => this._saveAbsence(), 600); }
         },
+      };
+    }
+    if (kind === "temperatures") {
+      const num = { number: { min: 0, max: 35, step: 0.5, unit_of_measurement: "°C", mode: "box" } };
+      return {
+        data: this._tmp,
+        schema: [{ type: "grid", name: "", flatten: true, schema: ["comfort", "comfort_minus_1", "comfort_minus_2", "eco", "frost_protection"].map((name) => ({ name, required: true, selector: num })) }],
+        labels: { comfort: "Confort", comfort_minus_1: "Confort -1", comfort_minus_2: "Confort -2", eco: "Éco", frost_protection: "Hors-gel" },
+        change: (v) => { this._tmp = { ...this._tmp, ...v }; this._tmpDirty = true; },
       };
     }
     if (kind === "holidays") {
@@ -474,15 +489,14 @@ class ChauffageManagerCard extends HTMLElement {
     if (kind === "slot") {
       const s = e.slots[+idx];
       return {
-        data: { time: `${s.time || "00:00"}:00`, mode: s.mode, temperature: s.temperature ?? undefined },
+        data: { time: `${s.time || "00:00"}:00`, mode: s.mode },
         schema: [{ type: "grid", name: "", flatten: true, schema: [
           { name: "time", required: true, selector: { time: {} } },
           { name: "mode", required: true, selector: dropdown(MODE_OPTIONS) },
-          { name: "temperature", selector: { number: { min: 5, max: 30, step: 0.5, unit_of_measurement: "°C", mode: "box" } } },
         ] }],
-        labels: { time: "Heure", mode: "Mode", temperature: "Température (thermostat)" },
+        labels: { time: "Heure", mode: "Mode" },
         change: (v) => {
-          s.time = String(v.time || "").slice(0, 5); s.mode = v.mode; s.temperature = v.temperature ?? null;
+          s.time = String(v.time || "").slice(0, 5); s.mode = v.mode;
           this._preview();
         },
       };
@@ -495,22 +509,21 @@ class ChauffageManagerCard extends HTMLElement {
         entitySel = { entity: ids.length ? { include_entities: ids } : { domain: "select" } };
       }
       return {
-        data: { name: e.name, floor: e.floor || undefined, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, absence_temperature: e.absence_temperature, power_entity: e.power_entity || undefined, power_threshold: e.power_threshold ?? 10, openings: e.openings || [] },
+        data: { name: e.name, floor: e.floor || undefined, type: e.type, entity: e.entity || undefined, climate: e.climate || undefined, power_entity: e.power_entity || undefined, power_threshold: e.power_threshold ?? 10, openings: e.openings || [] },
         schema: [
           { name: "name", required: true, selector: text },
           { name: "floor", selector: this._floorSelector() },
           { name: "type", required: true, selector: dropdown([{ value: "pilot_wire", label: "Fil pilote (select)" }, { value: "thermostat", label: "Thermostat (climate)" }]) },
           { name: "entity", required: true, selector: entitySel },
-          ...(pilot ? [{ name: "climate", selector: { entity: { domain: "climate" } } }]
-            : [{ name: "absence_temperature", selector: { number: { min: 5, max: 30, step: 0.5, unit_of_measurement: "°C", mode: "box" } } }]),
+          ...(pilot ? [{ name: "climate", selector: { entity: { domain: "climate" } } }] : []),
           { name: "power_entity", selector: { entity: { domain: "sensor", device_class: "power" } } },
           { name: "power_threshold", selector: { number: { min: 0, max: 5000, step: 1, unit_of_measurement: "W", mode: "box" } } },
           { name: "openings", selector: { entity: { domain: "binary_sensor", multiple: true } } },
         ],
-        labels: { name: "Nom", floor: "Étage (optionnel)", type: "Type", power_entity: "Capteur de puissance (optionnel)", power_threshold: "Seuil de chauffe", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", absence_temperature: "Température en absence", openings: "Ouvertures (fenêtres, portes) qui mettent en pause" },
+        labels: { name: "Nom", floor: "Étage (optionnel)", type: "Type", power_entity: "Capteur de puissance (optionnel)", power_threshold: "Seuil de chauffe", entity: pilot ? "Entité du fil pilote (select)" : "Entité thermostat (climate)", climate: "Entité climate pour la température (optionnel)", openings: "Ouvertures (fenêtres, portes) qui mettent en pause" },
         change: (v) => {
           const typeChanged = v.type !== e.type;
-          Object.assign(e, { name: v.name || "", floor: v.floor || "", type: v.type, entity: v.entity || "", climate: v.climate || "", openings: v.openings || [], power_entity: v.power_entity || "", power_threshold: v.power_threshold ?? 10, absence_temperature: v.absence_temperature ?? e.absence_temperature });
+          Object.assign(e, { name: v.name || "", floor: v.floor || "", type: v.type, entity: v.entity || "", climate: v.climate || "", openings: v.openings || [], power_entity: v.power_entity || "", power_threshold: v.power_threshold ?? 10 });
           if (typeChanged) { e.entity = ""; e.climate = ""; this._render(); }
         },
       };
@@ -548,8 +561,8 @@ class ChauffageManagerCard extends HTMLElement {
   /* ---------- interactions ---------- */
   _blank(kind) {
     return {
-      schedule: { kind, id: null, name: "", slots: [{ days: [0, 1, 2, 3, 4], time: "06:30", mode: "comfort", temperature: 19 }, { days: [0, 1, 2, 3, 4], time: "22:00", mode: "eco", temperature: 17 }] },
-      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", absence_temperature: 12, schedule_id: null, floor: "", openings: [], power_entity: "", power_threshold: 10 },
+      schedule: { kind, id: null, name: "", slots: [{ days: [0, 1, 2, 3, 4], time: "06:30", mode: "comfort" }, { days: [0, 1, 2, 3, 4], time: "22:00", mode: "eco" }] },
+      heater: { kind, id: null, name: "", type: "pilot_wire", entity: "", climate: "", schedule_id: null, floor: "", openings: [], power_entity: "", power_threshold: 10 },
       group: { kind, id: null, name: "", members: [], schedule_id: null, floor: "", openings: [] },
     }[kind];
   }
@@ -563,9 +576,7 @@ class ChauffageManagerCard extends HTMLElement {
       case "control": call("set_control", { target: d.t, control: d.v }); break;
       case "mode": {
         const t = this._data.targets.find((x) => x.id === d.t);
-        const data = { target: d.t, mode: d.v };
-        if (this._info(t).thermo) data.temperature = this._tempOf(t);
-        call("set_manual", data); break;
+        call("set_manual", { target: d.t, mode: d.v }); break;
       }
       case "temp": {
         const t = this._data.targets.find((x) => x.id === d.t);
@@ -578,7 +589,7 @@ class ChauffageManagerCard extends HTMLElement {
       case "edit": {
         const coll = { schedule: "schedules", heater: "heaters", group: "groups" }[d.k];
         this._edit = { kind: d.k, ...JSON.parse(JSON.stringify(this._data[coll].find((x) => x.id === d.id))) };
-        if (d.k === "heater") { this._edit.climate = this._edit.climate || ""; this._edit.absence_temperature = this._edit.absence_temperature ?? 12; }
+        if (d.k === "heater") this._edit.climate = this._edit.climate || "";
         this._render(); break;
       }
       case "del":
@@ -589,6 +600,7 @@ class ChauffageManagerCard extends HTMLElement {
       case "abs-save": this._saveAbsence(); break;
       case "opn-save": this._saveOpenings(); break;
       case "hol-save": this._saveHolidays(); break;
+      case "tmp-save": this._saveTemperatures(); break;
       case "day": {
         const s = this._edit.slots[+d.i], n = +d.d;
         s.days = s.days.includes(n) ? s.days.filter((x) => x !== n) : [...s.days, n].sort();
@@ -596,7 +608,7 @@ class ChauffageManagerCard extends HTMLElement {
         this._preview();
         break;
       }
-      case "addslot": this._edit.slots.push({ days: [0, 1, 2, 3, 4, 5, 6], time: "12:00", mode: "comfort", temperature: 19, holiday: !!d.hol }); this._render(); break;
+      case "addslot": this._edit.slots.push({ days: [0, 1, 2, 3, 4, 5, 6], time: "12:00", mode: "comfort", holiday: !!d.hol }); this._render(); break;
       case "delslot": this._edit.slots.splice(+d.i, 1); this._render(); break;
     }
   }
@@ -608,6 +620,16 @@ class ChauffageManagerCard extends HTMLElement {
       this._absDirty = false; await this._load();
       this._setBtn("abs-save", "ok", 1500);
     } catch (err) { this._setBtn("abs-save", "ko", 2000); this._toast(err); }
+  }
+  async _saveTemperatures() {
+    const t = this._tmp, def = { comfort: 19, comfort_minus_1: 18, comfort_minus_2: 17, eco: 15.5, frost_protection: 7 };
+    this._setBtn("tmp-save", "busy");
+    try {
+      const value = Object.fromEntries(Object.keys(def).map((k) => [k, Number(t[k] ?? def[k])]));
+      await this._ws({ type: "chauffage_manager/save", kind: "temperatures", value });
+      this._tmpDirty = false; await this._load();
+      this._setBtn("tmp-save", "ok", 1500);
+    } catch (err) { this._setBtn("tmp-save", "ko", 2000); this._toast(err); }
   }
   async _saveHolidays() {
     this._setBtn("hol-save", "busy");
@@ -632,10 +654,10 @@ class ChauffageManagerCard extends HTMLElement {
     if (!e.name.trim()) return this._toast("Nom requis");
     if (e.kind === "schedule") {
       if (e.slots.some((s) => !s.days.length || !s.time)) return this._toast("Chaque créneau nécessite des jours et une heure");
-      value = { name: e.name.trim(), slots: e.slots.map((s) => ({ days: s.days, time: s.time, mode: s.mode, holiday: !!s.holiday, temperature: s.temperature === "" || s.temperature == null ? null : Number(s.temperature) })) };
+      value = { name: e.name.trim(), slots: e.slots.map((s) => ({ days: s.days, time: s.time, mode: s.mode, holiday: !!s.holiday })) };
     } else if (e.kind === "heater") {
       if (!e.entity) return this._toast("Entité requise");
-      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12, floor: e.floor || null, openings: e.openings || [], power_entity: e.power_entity || null, power_threshold: e.power_threshold === "" || e.power_threshold == null ? 10 : Number(e.power_threshold) };
+      value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, floor: e.floor || null, openings: e.openings || [], power_entity: e.power_entity || null, power_threshold: e.power_threshold === "" || e.power_threshold == null ? 10 : Number(e.power_threshold) };
     } else {
       value = { name: e.name.trim(), members: e.members, schedule_id: e.schedule_id || null, floor: e.floor || null, openings: e.openings || [] };
     }
