@@ -13,12 +13,15 @@ const CARD_DEFAULTS = { show_power: true, show_temperature: true, show_mode: tru
 const cssColor = (v) => (!v || v === "state" ? "" : /^(#|rgb|hsl|var\()/.test(v) ? v : `var(--${v}-color)`);
 const toMin = (t) => { const [h, m] = t.split(":"); return +h * 60 + +m; };
 
-function slotAt(slots, weekday, minute) {
+function slotAt(slots, weekday, minute, hol = false) {
+  const eligible = (day, holiday) => {
+    if (holiday) { const h = slots.filter((x) => x.holiday && x.days.includes(day)); if (h.length) return h; }
+    return slots.filter((x) => !x.holiday && x.days.includes(day));
+  };
   for (let back = 0; back < 8; back++) {
     const day = (((weekday - back) % 7) + 7) % 7;
     let best = null;
-    for (const s of slots) {
-      if (!s.days.includes(day)) continue;
+    for (const s of eligible(day, back === 0 && hol)) {
       const st = toMin(s.time || "00:00");
       if (back === 0 && st > minute) continue;
       if (!best || st > toMin(best.time)) best = s;
@@ -28,13 +31,15 @@ function slotAt(slots, weekday, minute) {
   return null;
 }
 
-function timeline(sched) {
+function timeline(sched, hol = false) {
   const slots = sched.slots.filter((s) => s.time);
   const rows = [0, 1, 2, 3, 4, 5, 6].map((d) => {
-    const pts = [...new Set([0, ...slots.filter((s) => s.days.includes(d)).map((s) => toMin(s.time))])].sort((a, b) => a - b);
+    const holSlots = slots.filter((s) => s.holiday && s.days.includes(d));
+    const own = hol && holSlots.length ? holSlots : slots.filter((s) => !s.holiday && s.days.includes(d));
+    const pts = [...new Set([0, ...own.map((s) => toMin(s.time))])].sort((a, b) => a - b);
     const segs = pts.map((p, i) => {
       const end = i + 1 < pts.length ? pts[i + 1] : 1440;
-      const s = slotAt(slots, d, p);
+      const s = slotAt(slots, d, p, hol);
       const c = s ? MODE[s.mode].color : "transparent";
       return `<i style="width:${(end - p) / 14.4}%;background:${c}" title="${s ? MODE[s.mode].label : ""}"></i>`;
     }).join("");
@@ -122,6 +127,12 @@ ha-card{overflow:hidden}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 .row,.slot{transition:box-shadow .2s,border-color .2s}
+.badge.phase{border:1px solid var(--pc,var(--warning-color,#ff9800));color:var(--pc,var(--warning-color,#ff9800));background:color-mix(in srgb,var(--pc,var(--warning-color,#ff9800)) 16%,transparent)}
+.badge.phase.solid{background:var(--pc,var(--warning-color,#ff9800));color:#fff}
+.badge.phase.info{--pc:var(--info-color,#039be5)}
+.badge.pulse{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.55}}
+.sub small{font-weight:400;color:var(--secondary-text-color)}
 `;
 
 async function ensureHA() {
@@ -157,8 +168,27 @@ class ChauffageManagerCard extends HTMLElement {
   getGridOptions() { return { columns: 12, min_columns: 6 }; }
   static getStubConfig() { return {}; }
   static async getConfigElement() { return document.createElement("chauffage-manager-card-editor"); }
-  connectedCallback() { if (this._hass) { this._subscribe(); this._load(); } }
-  disconnectedCallback() { if (this._unsub) { this._unsub(); this._unsub = null; } }
+  connectedCallback() {
+    if (this._hass) { this._subscribe(); this._load(); }
+    this._cd = setInterval(() => this._tickCountdown(), 1000);
+  }
+  disconnectedCallback() {
+    if (this._unsub) { this._unsub(); this._unsub = null; }
+    clearInterval(this._cd);
+  }
+  _fmt(sec) { const r = Math.max(0, Math.round(sec)); return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`; }
+  _tickCountdown() {
+    this.shadowRoot.querySelectorAll("[data-left]").forEach((el) => {
+      el.textContent = `${el.dataset.prefix} ${this._fmt(Number(el.dataset.left) - (Date.now() - this._dataAt) / 1000)}`;
+    });
+  }
+  _pauseBadge(t) {
+    const st = t.pause_state || (t.paused ? "paused" : null);
+    if (!st) return "";
+    if (st === "paused") return `<span class="badge phase solid">En pause (ouverture)</span>`;
+    const pre = st === "pausing" ? "Pause dans" : "Reprise dans";
+    return `<span class="badge phase pulse ${st === "resuming" ? "info" : ""}" data-prefix="${pre}" data-left="${t.pause_in ?? 0}">${pre} ${this._fmt(t.pause_in ?? 0)}</span>`;
+  }
   set hass(hass) {
     this._hass = hass;
     if (!this._loaded) { this._loaded = true; this._load(); this._ensureHA(); }
@@ -182,8 +212,10 @@ class ChauffageManagerCard extends HTMLElement {
   async _load() {
     try {
       this._data = await this._hass.callWS({ type: "chauffage_manager/get" });
+      this._dataAt = Date.now();
       if (!this._absDirty) this._abs = JSON.parse(JSON.stringify(this._data.absence));
       if (!this._opnDirty) this._opn = { ...this._data.openings };
+      if (!this._holDirty) this._hol = { entity: this._data.holidays?.entity || undefined };
       this._error = "";
     } catch (e) { this._error = e.message || "Intégration non disponible"; }
     this._render();
@@ -259,6 +291,12 @@ class ChauffageManagerCard extends HTMLElement {
     [...this._data.heaters, ...this._data.groups].forEach((x) => x.floor && names.add(x.floor));
     return names.size ? { select: { custom_value: true, mode: "dropdown", options: [...names].map((n) => ({ value: n, label: n })) } } : { text: {} };
   }
+  _preview() {
+    const e = this._edit, pv = this.shadowRoot.getElementById("pv"), ph = this.shadowRoot.getElementById("pvh");
+    if (!e || !pv) return;
+    pv.innerHTML = timeline(e);
+    if (ph) ph.innerHTML = e.slots.some((x) => x.holiday) ? `<div class="sub">Aperçu jours fériés</div>${timeline(e, true)}` : "";
+  }
   _ripple(e) {
     const el = e.target.closest(".btn,.ib,.chip,.seg button,.tabs button,.days button");
     if (!el || el.disabled) return;
@@ -303,7 +341,7 @@ class ChauffageManagerCard extends HTMLElement {
       return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator", i.heating ? "heating" : "")}<div class="name">${esc(t.name)}${sub}</div>
         ${i.power != null && cfg.show_power !== false ? `<span class="pw ${i.heating ? "on" : ""}">${this._icon("flash")}${Math.round(i.power)} W</span>` : ""}
         ${i.cur != null && cfg.show_temperature !== false ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
-        ${t.paused ? `<span class="badge warn">En pause (ouverture)</span>` : ""}
+        ${this._pauseBadge(t)}
         ${m && cfg.show_mode !== false ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
         <div class="seg"><button data-a="control" data-t="${t.id}" data-v="auto" class="${t.control === "auto" ? "on" : ""}">Auto</button><button data-a="control" data-t="${t.id}" data-v="manual" class="${t.control === "manual" ? "on" : ""}">Manuel</button></div></div>${ctl}</div>`;
     };
@@ -315,7 +353,7 @@ class ChauffageManagerCard extends HTMLElement {
       const keys = [...byFloor.keys()].sort((a, b) => (a === "") - (b === "") || (a && b ? this._floorRank(a) - this._floorRank(b) : 0));
       rows = keys.map((k) => `<div class="floor">${esc(k || "Sans étage")}</div>${byFloor.get(k).map(rowHtml).join("")}`).join("");
     } else rows = d.targets.map(rowHtml).join("");
-    const banner = d.absence.active ? `<div class="info">${this._icon("home-export-outline")}Mode absence actif</div>` : "";
+    const banner = (d.absence.active ? `<div class="info">${this._icon("home-export-outline")}Mode absence actif</div>` : "") + (d.holidays?.today ? `<div class="info">${this._icon("calendar-star")}Jour férié aujourd'hui</div>` : "");
     return `${banner}${rows}${cfg.show_all_off !== false ? `<div class="actions"><button class="btn" data-a="alloff">${this._icon("power")}Tout éteindre</button></div>` : ""}`;
   }
 
@@ -323,18 +361,25 @@ class ChauffageManagerCard extends HTMLElement {
     const admin = this._admin();
     const e = this._edit;
     if (e && e.kind === "schedule") {
-      const slots = e.slots.map((s, i) => `<div class="slot"><div class="top"><div class="days">${DAYS.map((l, d) => `<button data-a="day" data-i="${i}" data-d="${d}" class="${s.days.includes(d) ? "on" : ""}">${l}</button>`).join("")}</div>
+      const slotHtml = (s, i) => `<div class="slot"><div class="top"><div class="days">${DAYS.map((l, d) => `<button data-a="day" data-i="${i}" data-d="${d}" class="${s.days.includes(d) ? "on" : ""}">${l}</button>`).join("")}</div>
         <button class="ib danger" data-a="delslot" data-i="${i}" title="Supprimer le créneau">${this._icon("delete")}</button></div>
-        <div data-form="slot" data-i="${i}"></div></div>`).join("");
+        <div data-form="slot" data-i="${i}"></div></div>`;
+      const normal = e.slots.map((s, i) => (s.holiday ? "" : slotHtml(s, i))).join("");
+      const feries = e.slots.map((s, i) => (s.holiday ? slotHtml(s, i) : "")).join("");
       return `<div data-form="sname"></div>
-        <div class="hint">Chaque créneau s'applique à partir de son heure jusqu'au suivant. La température ne concerne que les thermostats.</div>${slots}
+        <div class="hint">Chaque créneau s'applique à partir de son heure jusqu'au suivant. La température ne concerne que les thermostats.</div>
+        <div class="sub">Jours normaux</div>${normal}
         <div class="actions" style="justify-content:flex-start"><button class="btn" data-a="addslot">${this._icon("plus")}Créneau</button></div>
+        <div class="sub">Jours fériés <small>(optionnel)</small></div>
+        <div class="hint">Un jour férié suit les créneaux fériés du jour de la semaine correspondant (ex. un férié un mercredi utilise les créneaux fériés « M » du mercredi). S'il n'y en a pas pour ce jour, le planning normal s'applique. Le calendrier des jours fériés se choisit dans Configuration.</div>${feries}
+        <div class="actions" style="justify-content:flex-start"><button class="btn" data-a="addslot" data-hol="1">${this._icon("plus")}Créneau férié</button></div>
         <div id="pv">${timeline(e)}</div>
+        <div id="pvh">${e.slots.some((s) => s.holiday) ? `<div class="sub">Aperçu jours fériés</div>${timeline(e, true)}` : ""}</div>
         <div class="actions"><button class="btn text" data-a="cancel">Annuler</button>${this._saveBtn("save")}</div>`;
     }
     const list = this._data.schedules.map((s) => {
       const users = this._data.targets.filter((t) => t.schedule_id === s.id).map((t) => esc(t.name)).join(", ");
-      return `<div class="row"><div class="head">${this._icon("calendar-clock")}<div class="name">${esc(s.name)}<small>${users ? "Utilisé par : " + users : "Non assigné"}</small></div>
+      return `<div class="row"><div class="head">${this._icon("calendar-clock")}<div class="name">${esc(s.name)}<small>${users ? "Utilisé par : " + users : "Non assigné"}${s.slots.some((x) => x.holiday) ? " · jours fériés" : ""}</small></div>
         ${admin ? `<button class="ib" data-a="edit" data-k="schedule" data-id="${s.id}" title="Modifier">${this._icon("pencil")}</button><button class="ib danger" data-a="del" data-k="schedule" data-id="${s.id}" title="Supprimer">${this._icon("delete")}</button>` : ""}</div>${timeline(s)}</div>`;
     }).join("") || `<div class="muted">Aucun planning.</div>`;
     return `${list}${admin ? `<div class="actions"><button class="btn primary" data-a="new" data-v="schedule">${this._icon("plus")}Nouveau planning</button></div>` : ""}
@@ -357,6 +402,8 @@ class ChauffageManagerCard extends HTMLElement {
     const gs = this._data.groups.map((g) => row("group", g, g.members.map((m) => esc(this._data.heaters.find((h) => h.id === m)?.name || m)).join(" + "), "radiator-disabled")).join("") || `<div class="muted">Aucun groupe.</div>`;
     return `<div class="sub" style="margin-top:0">Chauffages</div>${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>
       <div class="sub">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>
+      <div class="sub">Jours fériés</div><div class="hint">Choisissez un calendrier de jours fériés (intégration « Jours fériés » de Home Assistant). Les plannings peuvent avoir des créneaux dédiés à ces jours.${this._data.holidays?.today ? " Aujourd'hui est un jour férié." : ""}</div><div data-form="holidays"></div>
+      <div class="actions">${this._saveBtn("hol-save")}</div>
       <div class="sub">Ouvertures</div><div class="hint">Quand une ouverture reste ouverte au-delà du délai, le chauffage passe en pause puis reprend sa consigne à la fermeture. Les ouvertures se choisissent dans chaque chauffage ou groupe.</div><div data-form="openings"></div>
       <div class="actions">${this._saveBtn("opn-save")}</div>`;
   }
@@ -379,6 +426,14 @@ class ChauffageManagerCard extends HTMLElement {
           this._abs = { ...this._abs, ...v }; this._absDirty = true;
           if (this._data?.absence?.active && this._admin()) { clearTimeout(this._absT); this._absT = setTimeout(() => this._saveAbsence(), 600); }
         },
+      };
+    }
+    if (kind === "holidays") {
+      return {
+        data: this._hol,
+        schema: [{ name: "entity", selector: { entity: { domain: "calendar" } } }],
+        labels: { entity: "Calendrier des jours fériés" },
+        change: (v) => { this._hol = { ...this._hol, ...v }; this._holDirty = true; },
       };
     }
     if (kind === "openings") {
@@ -427,7 +482,7 @@ class ChauffageManagerCard extends HTMLElement {
         labels: { time: "Heure", mode: "Mode", temperature: "Température (thermostat)" },
         change: (v) => {
           s.time = String(v.time || "").slice(0, 5); s.mode = v.mode; s.temperature = v.temperature ?? null;
-          const pv = this.shadowRoot.getElementById("pv"); if (pv) pv.innerHTML = timeline(e);
+          this._preview();
         },
       };
     }
@@ -532,14 +587,15 @@ class ChauffageManagerCard extends HTMLElement {
       case "save": this._save(); break;
       case "abs-save": this._saveAbsence(); break;
       case "opn-save": this._saveOpenings(); break;
+      case "hol-save": this._saveHolidays(); break;
       case "day": {
         const s = this._edit.slots[+d.i], n = +d.d;
         s.days = s.days.includes(n) ? s.days.filter((x) => x !== n) : [...s.days, n].sort();
         el.classList.toggle("on");
-        this.shadowRoot.getElementById("pv").innerHTML = timeline(this._edit);
+        this._preview();
         break;
       }
-      case "addslot": this._edit.slots.push({ days: [0, 1, 2, 3, 4, 5, 6], time: "12:00", mode: "comfort", temperature: 19 }); this._render(); break;
+      case "addslot": this._edit.slots.push({ days: [0, 1, 2, 3, 4, 5, 6], time: "12:00", mode: "comfort", temperature: 19, holiday: !!d.hol }); this._render(); break;
       case "delslot": this._edit.slots.splice(+d.i, 1); this._render(); break;
     }
   }
@@ -551,6 +607,14 @@ class ChauffageManagerCard extends HTMLElement {
       this._absDirty = false; await this._load();
       this._setBtn("abs-save", "ok", 1500);
     } catch (err) { this._setBtn("abs-save", "ko", 2000); this._toast(err); }
+  }
+  async _saveHolidays() {
+    this._setBtn("hol-save", "busy");
+    try {
+      await this._ws({ type: "chauffage_manager/save", kind: "holidays", value: { entity: this._hol.entity || null } });
+      this._holDirty = false; await this._load();
+      this._setBtn("hol-save", "ok", 1500);
+    } catch (err) { this._setBtn("hol-save", "ko", 2000); this._toast(err); }
   }
   async _saveOpenings() {
     const o = this._opn;
@@ -567,7 +631,7 @@ class ChauffageManagerCard extends HTMLElement {
     if (!e.name.trim()) return this._toast("Nom requis");
     if (e.kind === "schedule") {
       if (e.slots.some((s) => !s.days.length || !s.time)) return this._toast("Chaque créneau nécessite des jours et une heure");
-      value = { name: e.name.trim(), slots: e.slots.map((s) => ({ days: s.days, time: s.time, mode: s.mode, temperature: s.temperature === "" || s.temperature == null ? null : Number(s.temperature) })) };
+      value = { name: e.name.trim(), slots: e.slots.map((s) => ({ days: s.days, time: s.time, mode: s.mode, holiday: !!s.holiday, temperature: s.temperature === "" || s.temperature == null ? null : Number(s.temperature) })) };
     } else if (e.kind === "heater") {
       if (!e.entity) return this._toast("Entité requise");
       value = { name: e.name.trim(), type: e.type, entity: e.entity, climate: e.type === "pilot_wire" ? e.climate || null : null, schedule_id: e.schedule_id || null, absence_temperature: Number(e.absence_temperature) || 12, floor: e.floor || null, openings: e.openings || [], power_entity: e.power_entity || null, power_threshold: e.power_threshold === "" || e.power_threshold == null ? 10 : Number(e.power_threshold) };
