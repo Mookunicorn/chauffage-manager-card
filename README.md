@@ -35,6 +35,19 @@ heating_color: deep-orange
 ```
 Les onglets Plannings (édition), Absence (enregistrement) et Configuration sont réservés aux administrateurs.
 
+## Températures des modes (thermostats)
+Onglet Configuration → **Températures des modes** : une température par mode, utilisée pour les thermostats (`climate`) dans les plannings, le mode absence, les ouvertures et les boutons de mode.
+
+| Mode | Défaut |
+|---|---|
+| Confort | 19 °C |
+| Confort -1 | 18 °C |
+| Confort -2 | 17 °C |
+| Éco | 15,5 °C |
+| Hors-gel | 7 °C |
+
+« Off » n'a pas de température : il éteint le thermostat. Les créneaux de planning n'ont plus de champ température : ils suivent le mode. Dans l'onglet Pièces, un thermostat affiche sa consigne dans le badge (la couleur suit le mode correspondant) et garde le bouton Off et le réglage − / + (qui fixe une consigne libre).
+
 ## Tri par étage (optionnel)
 Chaque chauffage ou groupe a un champ **Étage** (Configuration). Les étages définis dans Home Assistant sont proposés dans la liste, et vous pouvez en saisir un autre. Avec `group_by_floor: true`, l'onglet Pièces affiche un séparateur par étage (ordre des niveaux Home Assistant), puis « Sans étage ». Sans cette option, la liste reste inchangée.
 
