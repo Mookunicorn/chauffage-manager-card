@@ -199,7 +199,10 @@ class ChauffageManagerCard extends HTMLElement {
   }
   setConfig(config) {
     this._config = { tabs: ["rooms", "schedules", "absence", "config"], ...config };
-    if (!this._tab || !this._config.tabs.includes(this._tab)) this._tab = this._config.tabs.includes(this._config.default_tab) ? this._config.default_tab : this._config.tabs[0];
+    const tabs = this._config.tabs;
+    const def = tabs.includes(this._config.default_tab) ? this._config.default_tab : tabs[0];
+    if (!this._tab || !tabs.includes(this._tab) || this._defTab !== def) { this._tab = def; this._edit = null; }
+    this._defTab = def;
     this._render();
   }
   getCardSize() { return 6; }
@@ -314,8 +317,8 @@ class ChauffageManagerCard extends HTMLElement {
   _render() {
     if (!this._config) return;
     const admin = this._admin();
-    const tabs = this._config.tabs.filter((t) => admin || t !== "config");
-    if (!tabs.includes(this._tab)) this._tab = tabs[0];
+    const tabs = this._hass ? this._config.tabs.filter((t) => admin || t !== "config") : this._config.tabs;
+    if (this._hass && !tabs.includes(this._tab)) this._tab = tabs[0];
     const bar = tabs.length > 1 ? `<div class="tabs">${tabs.map((t) => `<button data-a="tab" data-v="${t}" class="${t === this._tab ? "on" : ""}">${TABS[t]}</button>`).join("")}</div>` : "";
     const body = !this._data ? `<div class="muted">${this._error ? "" : "Chargement…"}</div>` : this[`_v_${this._tab}`]();
     const hc = cssColor(this._config.heating_color);
