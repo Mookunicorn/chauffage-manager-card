@@ -137,6 +137,40 @@ ha-card{overflow:hidden}
 .badge.pulse{animation:pulse 1.6s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.55}}
 .sub small{font-weight:400;color:var(--secondary-text-color)}
+.acc{border:1px solid var(--divider-color);border-radius:12px;margin-bottom:8px}
+.acc.inner{margin:8px 0 0;border-radius:10px}
+.acc-h{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;background:none;border:none;border-radius:12px;cursor:pointer;color:var(--primary-text-color);font:inherit;text-align:left}
+.acc-h:hover{background-color:color-mix(in srgb,var(--primary-color) 8%,transparent)}
+.acc-h>ha-icon{color:var(--secondary-text-color)}
+.acc-t{flex:1;min-width:0;font-weight:500}
+.acc-t small{display:block;font-weight:400;color:var(--secondary-text-color);font-size:.85em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc .chev{transition:transform .25s}
+.acc.open>.acc-h .chev{transform:rotate(180deg)}
+.acc-b{display:none;padding:0 14px 14px}
+.acc.open>.acc-b{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(-4px)}}
+.acc-b>.hint:first-child{margin-top:0}
+.name small.meta{display:none}
+.mdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-right:5px}
+.meta .on{color:var(--heat-color,var(--state-climate-heat-color,#ff8c00));font-weight:500}
+.wrap{container-type:inline-size}
+@container (max-width:520px){
+  .row{padding:10px 12px}
+  .head{flex-wrap:wrap;gap:8px}
+  .head>.name{flex:1 1 0;min-width:0}
+  .head .temp,.head .pw,.head .badge.mode{display:none}
+  .name small.meta{display:block}
+  .badge.phase{order:5;flex:1 1 100%;text-align:center}
+  .seg button{padding:5px 12px;font-size:.9em}
+  .chips{flex-wrap:nowrap;overflow-x:auto;margin:8px -12px 0;padding:2px 12px;scroll-snap-type:x proximity;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 28px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 10px,#000 calc(100% - 28px),transparent 100%)}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;scroll-snap-align:center}
+  .step{flex:0 0 auto}
+  .tabs{padding:0}
+  .tabs button{padding:12px 4px;font-size:.9em;white-space:nowrap}
+  .actions{justify-content:stretch}
+  .actions .btn{flex:1 1 auto;justify-content:center}
+}
 `;
 
 async function ensureHA() {
@@ -158,7 +192,7 @@ class ChauffageManagerCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._data = null; this._edit = null; this._abs = null; this._absDirty = false;
     this._temps = {}; this._error = ""; this._sig = ""; this._tab = null; this._forms = [];
-    this._btnState = {}; this._btnT = {};
+    this._btnState = {}; this._btnT = {}; this._open = {};
     const r = this.shadowRoot;
     r.addEventListener("click", (e) => this._click(e));
     r.addEventListener("pointerdown", (e) => this._ripple(e));
@@ -303,7 +337,7 @@ class ChauffageManagerCard extends HTMLElement {
     if (this._edit && pv) pv.innerHTML = timeline(this._edit);
   }
   _ripple(e) {
-    const el = e.target.closest(".btn,.ib,.chip,.seg button,.tabs button,.days button");
+    const el = e.target.closest(".btn,.ib,.chip,.seg button,.tabs button,.days button,.acc-h");
     if (!el || el.disabled) return;
     const r = el.getBoundingClientRect(), size = Math.max(r.width, r.height) * 2;
     const s = document.createElement("span");
@@ -322,6 +356,10 @@ class ChauffageManagerCard extends HTMLElement {
     const st = this._btnState[action] || "";
     const icon = st === "busy" ? `<span class="spin"></span>` : st === "ok" ? this._icon("check") : st === "ko" ? this._icon("alert-circle-outline") : "";
     return `<button class="btn primary ${st}" data-a="${action}" ${st === "busy" ? "disabled" : ""}>${icon}${st === "ok" ? "Enregistré" : label}</button>`;
+  }
+  _acc(key, icon, title, summary, body, def = false, inner = false) {
+    const open = key in this._open ? this._open[key] : def;
+    return `<div class="acc ${inner ? "inner" : ""} ${open ? "open" : ""}"><button class="acc-h" data-a="acc" data-k="${key}" data-def="${def ? 1 : 0}" aria-expanded="${open}">${this._icon(icon)}<span class="acc-t">${title}${summary ? `<small>${summary}</small>` : ""}</span>${this._icon("chevron-down", "chev")}</button><div class="acc-b">${body}</div></div>`;
   }
   _icon(name, cls = "") { return `<ha-icon${cls ? ` class="${cls}"` : ""} icon="mdi:${name}"></ha-icon>`; }
 
@@ -344,11 +382,12 @@ class ChauffageManagerCard extends HTMLElement {
       } else {
         ctl = `<div class="sched" data-form="sched" data-i="${t.id}"></div>`;
       }
-      return `<div class="row"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator", i.heating ? "heating" : "")}<div class="name">${esc(t.name)}${sub}</div>
+      const meta = [i.cur != null && cfg.show_temperature !== false ? `${i.cur.toFixed(1)}°C` : "", i.power != null && cfg.show_power !== false ? `<span class="${i.heating ? "on" : ""}">${Math.round(i.power)} W</span>` : "", m && cfg.show_mode !== false ? `<span class="mdot" style="--c:${m.color}"></span>${m.label}${i.mixed ? "…" : ""}` : ""].filter(Boolean).join(" · ");
+      return `<div class="row ${t.control}"><div class="head">${this._icon(t.kind === "group" ? "radiator-disabled" : "radiator", i.heating ? "heating" : "")}<div class="name">${esc(t.name)}${sub}${meta ? `<small class="meta">${meta}</small>` : ""}</div>
         ${i.power != null && cfg.show_power !== false ? `<span class="pw ${i.heating ? "on" : ""}">${this._icon("flash")}${Math.round(i.power)} W</span>` : ""}
         ${i.cur != null && cfg.show_temperature !== false ? `<span class="temp">${i.cur.toFixed(1)}°C</span>` : ""}
         ${this._pauseBadge(t)}
-        ${m && cfg.show_mode !== false ? `<span class="badge" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
+        ${m && cfg.show_mode !== false ? `<span class="badge mode" style="background:${m.color}">${m.label}${i.mixed ? "…" : ""}</span>` : ""}
         <div class="seg"><button data-a="control" data-t="${t.id}" data-v="auto" class="${t.control === "auto" ? "on" : ""}">Auto</button><button data-a="control" data-t="${t.id}" data-v="manual" class="${t.control === "manual" ? "on" : ""}">Manuel</button></div></div>${ctl}</div>`;
     };
     const floorOf = (t) => (t.kind === "group" ? d.groups : d.heaters).find((x) => x.id === t.id)?.floor || "";
@@ -405,14 +444,22 @@ class ChauffageManagerCard extends HTMLElement {
     const row = (k, x, sub, icon) => `<div class="li">${this._icon(icon)}<div class="name">${esc(x.name)}<small>${sub}</small></div><button class="ib" data-a="edit" data-k="${k}" data-id="${x.id}" title="Modifier">${this._icon("pencil")}</button><button class="ib danger" data-a="del" data-k="${k}" data-id="${x.id}" title="Supprimer">${this._icon("delete")}</button></div>`;
     const hs = this._data.heaters.map((h) => row("heater", h, `${h.type === "pilot_wire" ? "Fil pilote" : "Thermostat"} · ${esc(h.entity)}`, "radiator")).join("") || `<div class="muted">Aucun chauffage.</div>`;
     const gs = this._data.groups.map((g) => row("group", g, g.members.map((m) => esc(this._data.heaters.find((h) => h.id === m)?.name || m)).join(" + "), "radiator-disabled")).join("") || `<div class="muted">Aucun groupe.</div>`;
-    return `<div class="sub" style="margin-top:0">Chauffages</div>${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>
-      <div class="sub">Groupes</div>${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>
-      <div class="sub">Températures des modes</div><div class="hint">Température appliquée aux thermostats (climate) pour chaque mode : boutons, plannings, absence et ouvertures. « Off » éteint simplement le thermostat.</div><div data-form="temperatures"></div>
-      <div class="actions">${this._saveBtn("tmp-save")}</div>
-      <div class="sub">Jours fériés</div><div class="hint">Choisissez un calendrier de jours fériés (intégration « Jours fériés » de Home Assistant). Les plannings peuvent avoir des créneaux dédiés à ces jours.${this._data.holidays?.today ? " Aujourd'hui est un jour férié." : ""}</div><div data-form="holidays"></div>
-      <div class="actions">${this._saveBtn("hol-save")}</div>
-      <div class="sub">Ouvertures</div><div class="hint">Quand une ouverture reste ouverte au-delà du délai, le chauffage passe en pause puis reprend sa consigne à la fermeture. Les ouvertures se choisissent dans chaque chauffage ou groupe.</div><div data-form="openings"></div>
-      <div class="actions">${this._saveBtn("opn-save")}</div>`;
+    const T = this._data.temperatures || {}, H = this._data.holidays || {}, O = this._data.openings || {};
+    const n = (c, one, many) => `${c} ${c > 1 ? many : one}`;
+    const devices = this._acc("dev", "radiator", "Appareils", n(this._data.heaters.length, "appareil", "appareils"),
+      `${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>`, true, true);
+    const groups = this._acc("grp", "radiator-disabled", "Groupes", n(this._data.groups.length, "groupe", "groupes"),
+      `${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>`, false, true);
+    const fmt = (v) => String(v ?? "").replace(".", ",");
+    return [
+      this._acc("heat", "radiator", "Chauffages", `${n(this._data.heaters.length, "appareil", "appareils")} · ${n(this._data.groups.length, "groupe", "groupes")}`, devices + groups, true),
+      this._acc("tmp", "thermometer", "Thermostats", `Confort ${fmt(T.comfort)}° · Éco ${fmt(T.eco)}° · Hors-gel ${fmt(T.frost_protection)}°`,
+        `<div class="hint">Température appliquée aux thermostats (climate) pour chaque mode : boutons, plannings, absence et ouvertures. « Off » éteint simplement le thermostat.</div><div data-form="temperatures"></div><div class="actions">${this._saveBtn("tmp-save")}</div>`),
+      this._acc("hol", "calendar-star", "Jours fériés", H.entity ? `${esc(this._hass.states[H.entity]?.attributes.friendly_name || H.entity)}${H.today ? " · aujourd'hui férié" : ""}` : "Aucun calendrier choisi",
+        `<div class="hint">Choisissez un calendrier de jours fériés (intégration « Jours fériés » de Home Assistant). Les plannings peuvent avoir des créneaux dédiés à ces jours.${H.today ? " Aujourd'hui est un jour férié." : ""}</div><div data-form="holidays"></div><div class="actions">${this._saveBtn("hol-save")}</div>`),
+      this._acc("opn", "window-open-variant", "Ouvertures", `Pause après ${fmt(O.delay)} min · ${MODE[O.mode]?.label || ""}`,
+        `<div class="hint">Quand une ouverture reste ouverte au-delà du délai, le chauffage passe en pause puis reprend sa consigne à la fermeture. Les ouvertures se choisissent dans chaque chauffage ou groupe.</div><div data-form="openings"></div><div class="actions">${this._saveBtn("opn-save")}</div>`),
+    ].join("");
   }
 
   /* ---------- formulaires Home Assistant (ha-form) ---------- */
@@ -572,6 +619,13 @@ class ChauffageManagerCard extends HTMLElement {
     const d = el.dataset, h = this._hass;
     const call = (s, data) => h.callService("chauffage_manager", s, data).catch((err) => this._toast(err));
     switch (d.a) {
+      case "acc": {
+        const open = d.k in this._open ? this._open[d.k] : d.def === "1";
+        this._open[d.k] = !open;
+        el.parentElement.classList.toggle("open", !open);
+        el.setAttribute("aria-expanded", String(!open));
+        break;
+      }
       case "tab": this._tab = d.v; this._edit = null; this._render(); break;
       case "control": call("set_control", { target: d.t, control: d.v }); break;
       case "mode": {
