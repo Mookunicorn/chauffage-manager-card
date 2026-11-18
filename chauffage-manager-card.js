@@ -139,7 +139,7 @@ ha-card{overflow:hidden}
 .sub small{font-weight:400;color:var(--secondary-text-color)}
 .acc{border:1px solid var(--divider-color);border-radius:12px;margin-bottom:8px}
 .acc.inner{margin:8px 0 0;border-radius:10px}
-.acc-h{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;background:none;border:none;border-radius:12px;cursor:pointer;color:var(--primary-text-color);font:inherit;text-align:left}
+.acc-h{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;background:none;border:none;border-radius:12px;cursor:pointer;color:var(--primary-text-color);font:inherit;text-align:left;position:relative;overflow:hidden}
 .acc-h:hover{background-color:color-mix(in srgb,var(--primary-color) 8%,transparent)}
 .acc-h>ha-icon{color:var(--secondary-text-color)}
 .acc-t{flex:1;min-width:0;font-weight:500}
@@ -447,20 +447,19 @@ class ChauffageManagerCard extends HTMLElement {
     const row = (k, x, sub, icon) => `<div class="li">${this._icon(icon)}<div class="name">${esc(x.name)}<small>${sub}</small></div><button class="ib" data-a="edit" data-k="${k}" data-id="${x.id}" title="Modifier">${this._icon("pencil")}</button><button class="ib danger" data-a="del" data-k="${k}" data-id="${x.id}" title="Supprimer">${this._icon("delete")}</button></div>`;
     const hs = this._data.heaters.map((h) => row("heater", h, `${h.type === "pilot_wire" ? "Fil pilote" : "Thermostat"} · ${esc(h.entity)}`, "radiator")).join("") || `<div class="muted">Aucun chauffage.</div>`;
     const gs = this._data.groups.map((g) => row("group", g, g.members.map((m) => esc(this._data.heaters.find((h) => h.id === m)?.name || m)).join(" + "), "radiator-disabled")).join("") || `<div class="muted">Aucun groupe.</div>`;
-    const T = this._data.temperatures || {}, H = this._data.holidays || {}, O = this._data.openings || {};
+    const H = this._data.holidays || {};
     const n = (c, one, many) => `${c} ${c > 1 ? many : one}`;
     const devices = this._acc("dev", "radiator", "Appareils", n(this._data.heaters.length, "appareil", "appareils"),
-      `${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>`, true, true);
+      `${hs}<div class="actions"><button class="btn primary" data-a="new" data-v="heater">${this._icon("plus")}Chauffage</button></div>`, false, true);
     const groups = this._acc("grp", "radiator-disabled", "Groupes", n(this._data.groups.length, "groupe", "groupes"),
       `${gs}<div class="actions"><button class="btn primary" data-a="new" data-v="group">${this._icon("plus")}Groupe</button></div>`, false, true);
-    const fmt = (v) => String(v ?? "").replace(".", ",");
     return [
-      this._acc("heat", "radiator", "Chauffages", `${n(this._data.heaters.length, "appareil", "appareils")} · ${n(this._data.groups.length, "groupe", "groupes")}`, devices + groups, true),
-      this._acc("tmp", "thermometer", "Thermostats", `Confort ${fmt(T.comfort)}° · Éco ${fmt(T.eco)}° · Hors-gel ${fmt(T.frost_protection)}°`,
+      this._acc("heat", "radiator", "Chauffages", `${n(this._data.heaters.length, "appareil", "appareils")} · ${n(this._data.groups.length, "groupe", "groupes")}`, devices + groups, false),
+      this._acc("tmp", "thermometer", "Thermostats", "",
         `<div class="hint">Température appliquée aux thermostats (climate) pour chaque mode : boutons, plannings, absence et ouvertures. « Off » éteint simplement le thermostat.</div><div data-form="temperatures"></div><div class="actions">${this._saveBtn("tmp-save")}</div>`),
-      this._acc("hol", "calendar-star", "Calendrier Jours fériés", H.entity ? `${esc(this._hass.states[H.entity]?.attributes.friendly_name || H.entity)}${H.today ? " · aujourd'hui férié" : ""}` : "Aucun calendrier choisi",
+      this._acc("hol", "calendar-star", "Calendrier Jours fériés", "",
         `<div class="hint">Choisissez un calendrier de jours fériés (intégration « Jours fériés » de Home Assistant). Les plannings peuvent avoir des créneaux dédiés à ces jours.${H.today ? " Aujourd'hui est un jour férié." : ""}</div><div data-form="holidays"></div><div class="actions">${this._saveBtn("hol-save")}</div>`),
-      this._acc("opn", "window-open-variant", "Ouvertures", `Pause après ${fmt(O.delay)} min · ${MODE[O.mode]?.label || ""}`,
+      this._acc("opn", "window-open-variant", "Ouvertures", "",
         `<div class="hint">Quand une ouverture reste ouverte au-delà du délai, le chauffage passe en pause puis reprend sa consigne à la fermeture. Les ouvertures se choisissent dans chaque chauffage ou groupe.</div><div data-form="openings"></div><div class="actions">${this._saveBtn("opn-save")}</div>`),
     ].join("");
   }
